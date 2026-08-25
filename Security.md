@@ -167,13 +167,12 @@ All compute resources (Lambda, Step Functions, Bedrock Agents) operate under ded
 
 ---
 
-## 4. Network Isolation & Perimeter Defense (`[REQ-SEC-02]`)
+## 4. Network Security & Data Transport Protection (`[REQ-SEC-02]`)
 
-* **Amazon VPC Architecture:** Backend Lambda execution environments are placed within private subnets having no direct Internet Gateway (IGW) or NAT routes.
-* **S3 Gateway Endpoint:** Secure, direct access to S3 buckets within the AWS network without internet traversal.
-* **DynamoDB Gateway Endpoint:** Private routing for DynamoDB queries.
-* **Interface VPC Endpoints (PrivateLink):** Configured for Amazon Bedrock, Amazon Textract, AWS KMS, and AWS Step Functions.
-* **Presigned URLs for PDF Viewing:** Patient medical records are never exposed via public URLs. The review API generates short-lived S3 Presigned GET URLs with a maximum 15-minute Time-To-Live (TTL), scoped strictly to the authenticated clinical reviewer session.
+* **Serverless Network Isolation:** The entire platform runs on managed serverless AWS services with zero compute instances (EC2), public database ports, or ingress listeners exposed to the internet.
+* **Internal AWS Backbone Communication:** Microservices (Lambda, Step Functions) communicate with Amazon Bedrock, Amazon Textract, DynamoDB, S3, and AWS KMS across AWS's secure internal cloud network, authenticated via IAM Signature Version 4 (SigV4) and encrypted via TLS 1.3.
+* **No Direct Internet Exposure:** Ingestion buckets and databases are private by default, with public access blocks enforced at the S3 account and bucket levels.
+* **Time-Limited Presigned URLs for PDF Viewing:** Patient medical records are never exposed via public URLs. The clinical review API generates short-lived S3 Presigned GET URLs with a maximum 15-minute Time-To-Live (TTL), scoped strictly to the authenticated clinical reviewer session.
 
 ---
 

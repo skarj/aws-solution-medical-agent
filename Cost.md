@@ -75,6 +75,7 @@ All quantitative pricing calculations derive strictly from the operational metri
 * **AWS Step Functions:** 100 patient screening executions + 2 protocol onboarding executions (~1,530 state transitions / month) = $0.04 / month.
 * **AWS Lambda:** ~3,000 invocations / month across OCR handlers, parsing, and review APIs = $0.20 / month.
 * **Amazon API Gateway:** ~5,000 REST API requests / month = $0.02 / month.
+* **Networking & Data Transfer:** Pure serverless communication over AWS backbone; $0.00 idle networking cost (no VPC Interface Endpoint ENI or NAT Gateway fees).
 * **Estimated Monthly Subtotal:** **$2.00 – $7.00 / month**.
 
 ---

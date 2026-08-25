@@ -46,4 +46,3 @@ The AI-Assisted Clinical Trial Screening Platform relies on the following offici
 | **Amazon Cognito** | User directory and authentication service enforcing Multi-Factor Authentication (MFA) and RBAC. | `[REQ-SEC-04]` | [Amazon Cognito Documentation](https://docs.aws.amazon.com/cognito/) |
 | **AWS CloudTrail** | Regulatory auditing service logging management and S3/KMS data events. | `[REQ-SEC-05]` | [AWS CloudTrail Documentation](https://docs.aws.amazon.com/cloudtrail/) |
 | **Amazon CloudWatch** | Centralized logging, metrics collection, and alerting for Step Functions and Lambda execution. | `[REQ-SEC-05]` | [Amazon CloudWatch Documentation](https://docs.aws.amazon.com/cloudwatch/) |
-| **Amazon Virtual Private Cloud (Amazon VPC) & PrivateLink** | Network isolation for microservices and private interface endpoints for AWS services. | `[REQ-SEC-02]` | [Amazon VPC Documentation](https://docs.aws.amazon.com/vpc/) |
