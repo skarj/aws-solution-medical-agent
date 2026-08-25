@@ -26,7 +26,7 @@ All quantitative pricing calculations derive strictly from the operational metri
 
 ## 3. Detailed Component Cost Derivations (`[REQ-COST-01]`)
 
-### 3.1 Document Processing — Amazon Textract (`[REQ-F-02, REQ-F-07]`)
+### 3.1 Document Processing — Amazon Textract (`[REQ-F-03, REQ-F-09]`)
 * **Monthly Workload:** 20,000 patient record pages + 200 protocol pages = 20,200 pages / month.
 * **Pricing Rates:** Raw text detection ($0.0015/page) and Table/Form analysis ($0.015/page) for structured sections; blended effective rate is ~$0.0035 / page.
 * **Monthly Calculation:** 20,200 pages × $0.0035/page = **$70.70 / month**.
@@ -34,18 +34,18 @@ All quantitative pricing calculations derive strictly from the operational metri
 
 ---
 
-### 3.2 AI, Embeddings & Generative Reasoning — Amazon Bedrock (`[REQ-F-03, REQ-F-09, REQ-F-12, REQ-F-14]`)
+### 3.2 AI, Embeddings & Generative Reasoning — Amazon Bedrock (`[REQ-F-05, REQ-F-11, REQ-F-14, REQ-F-16]`)
 
-#### A. Embedding Generation (`[REQ-F-09]` — Amazon Titan Text Embeddings v2):
+#### A. Embedding Generation (`[REQ-F-11]` — Amazon Titan Text Embeddings v2):
 * **Monthly Tokens:** 20,200 pages × ~450 words = ~9,090,000 words = ~12,120,000 input tokens.
 * **Pricing Rate:** $0.00002 per 1,000 tokens.
 * **Monthly Calculation:** (12,120,000 / 1,000) × $0.00002 = **$0.24 / month**.
 
-#### B. Protocol Rule Extraction (`[REQ-F-03]` — Amazon Nova Pro / Claude 3.5 Sonnet):
+#### B. Protocol Rule Extraction (`[REQ-F-05]` — Amazon Nova Pro / Claude 3.5 Sonnet):
 * **Monthly Workload:** 2 protocols × 100 pages = 130,000 input tokens; ~12,000 output tokens.
 * **Estimated Monthly Subtotal:** **$0.15 – $0.60 / month**.
 
-#### C. Patient Screening Reasoning Agent (`[REQ-F-12, REQ-F-14]`):
+#### C. Patient Screening Reasoning Agent (`[REQ-F-14, REQ-F-16]`):
 * **Input Context Tokens:** 100 patients × 12 criteria × 5 chunks = 2,400,000 input context tokens / month.
 * **Output Verdict Tokens:** 100 patients × 1,500 output tokens = 150,000 output tokens / month.
 * **Token Cost:** Input (2.4M × $0.0008–$0.003/1k = $1.92–$7.20) + Output (150k × $0.0032–$0.015/1k = $0.48–$2.25).
@@ -54,7 +54,7 @@ All quantitative pricing calculations derive strictly from the operational metri
 
 ---
 
-### 3.3 Storage & Vector Management (`[REQ-F-01, REQ-F-05, REQ-F-08, REQ-F-10]`)
+### 3.3 Storage & Vector Management (`[REQ-F-01, REQ-F-04, REQ-F-07, REQ-F-10, REQ-F-12]`)
 * **Amazon S3 Storage:** 10 GB new data / month (~120 GB in Year 1) × $0.023/GB = ~$2.76 / month.
 * **S3 API Requests:** PUT, GET, and LIST operations = ~$0.50 / month.
 * **Serverless Vector Storage:** Vector index storage and read/write units in Bedrock Knowledge Bases = ~$10.00 – $35.00 / month.
@@ -62,7 +62,7 @@ All quantitative pricing calculations derive strictly from the operational metri
 
 ---
 
-### 3.4 Database & Cache — Amazon DynamoDB (`[REQ-F-04, REQ-F-15]`)
+### 3.4 Database & Cache — Amazon DynamoDB (`[REQ-F-06, REQ-F-17]`)
 * **Billing Mode:** On-Demand Capacity Mode.
 * **Write Requests:** ~1,500 writes / month (protocols and verdicts) = negligible (< $0.05).
 * **Read Requests:** ~10,000 reads / month = negligible (< $0.05).
@@ -71,7 +71,7 @@ All quantitative pricing calculations derive strictly from the operational metri
 
 ---
 
-### 3.5 Orchestration & API — Step Functions, Lambda & API Gateway (`[REQ-F-02, REQ-F-06, REQ-SEC-02]`)
+### 3.5 Orchestration & API — Step Functions, Lambda & API Gateway (`[REQ-F-02, REQ-F-08, REQ-SEC-02]`)
 * **AWS Step Functions:** 100 patient screening executions + 2 protocol onboarding executions (~1,530 state transitions / month) = $0.04 / month.
 * **AWS Lambda:** ~3,000 invocations / month across OCR handlers, parsing, and review APIs = $0.20 / month.
 * **Amazon API Gateway:** ~5,000 REST API requests / month = $0.02 / month.
@@ -92,21 +92,12 @@ All quantitative pricing calculations derive strictly from the operational metri
 
 | Category | Primary AWS Services | Baseline Low (USD/mo) | Baseline High (USD/mo) | Governing REQ IDs |
 | :--- | :--- | :--- | :--- | :--- |
-| **Document Processing** | Amazon Textract (Async OCR) | $60.00 | $110.00 | `[REQ-F-02, REQ-F-07]` |
-| **AI & Vector Reasoning** | Amazon Bedrock (Agent, KB, Titan, Nova/Claude) | $18.00 | $50.00 | `[REQ-F-03, REQ-F-09, REQ-F-12, REQ-F-14]` |
-| **Storage & Vectors** | Amazon S3 + Bedrock Vector Store | $13.00 | $38.00 | `[REQ-F-01, REQ-F-05, REQ-F-08, REQ-F-10]` |
-| **Database Tier** | Amazon DynamoDB (On-Demand) | $1.00 | $5.00 | `[REQ-F-04, REQ-F-15]` |
-| **Orchestration & API** | Step Functions + Lambda + API Gateway | $2.00 | $7.00 | `[REQ-F-06, REQ-SEC-02]` |
+| **Document Processing** | Amazon Textract (Async OCR) | $60.00 | $110.00 | `[REQ-F-03, REQ-F-09]` |
+| **AI & Vector Reasoning** | Amazon Bedrock (Agent, KB, Titan, Nova/Claude) | $18.00 | $50.00 | `[REQ-F-05, REQ-F-11, REQ-F-14, REQ-F-16]` |
+| **Storage & Vectors** | Amazon S3 + Bedrock Vector Store | $13.00 | $38.00 | `[REQ-F-01, REQ-F-04, REQ-F-07, REQ-F-10, REQ-F-12]` |
+| **Database Tier** | Amazon DynamoDB (On-Demand) | $1.00 | $5.00 | `[REQ-F-06, REQ-F-17]` |
+| **Orchestration & API** | Step Functions + Lambda + API Gateway | $2.00 | $7.00 | `[REQ-F-02, REQ-F-08, REQ-SEC-02]` |
 | **Security & Auditing** | AWS KMS + CloudWatch + CloudTrail + Cognito | $11.00 | $30.00 | `[REQ-SEC-01, REQ-SEC-04, REQ-SEC-05]` |
 | **Total Monthly Spend** | | **$105.00** | **$240.00** | `[REQ-COST-01]` |
 | **Total Annual Spend** | | **$1,260.00** | **$2,880.00** | **Budget Ceiling: $5,000.00** |
 
----
-
-## Archive
-
-### Initial Sizing Estimate (Superseded)
-* **Monthly Range:** ~$160.00 – $345.00 / month
-* **Annual Range:** ~$1,920.00 – $4,140.00 / year
-* **Superseded Date:** 2026-08-25
-* **Reason:** Replaced with exact formulaic unit-cost derivations aligned to `[REQ-COST-01]`.

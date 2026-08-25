@@ -16,32 +16,34 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 ## 3. Functional Requirements
 
 ### 3.1 Protocol Onboarding & Structuring
-* **[Approved] [REQ-F-01]:** The system shall accept a single study protocol PDF (30–100 pages) uploaded by the Clinical Investigator via a web portal into an encrypted S3 bucket (`protocol-data-upload`).
+* **[Approved] [REQ-F-01]:** The system shall accept a single study protocol PDF (30–100 pages, searchable or scanned) uploaded by the Clinical Investigator via a web portal into an encrypted S3 bucket (`protocol-data-upload`).
 * **[Approved] [REQ-F-02]:** Protocol PDF upload events must automatically initiate an AWS Step Functions state machine execution to orchestrate asynchronous background processing.
-* **[Approved] [REQ-F-03]:** Step Functions must execute a Lambda task passing the extracted protocol text to an LLM on Amazon Bedrock (such as Amazon Nova Pro or Anthropic Claude Sonnet) to extract all inclusion and exclusion rules into an itemized JSON array.
-* **[Approved] [REQ-F-04]:** Extracted protocol rules must be stored in an Amazon DynamoDB table (`study-protocols`), indexed by `StudyID`.
+* **[Approved] [REQ-F-03]:** Step Functions must invoke Amazon Textract asynchronously (`StartDocumentAnalysis`) to extract text, tables, and form data from the protocol PDF.
+* **[Approved] [REQ-F-04]:** Textract output files must be written to an intermediate S3 bucket (`protocol-extracted-data`) before triggering the next ingestion step.
+* **[Approved] [REQ-F-05]:** Step Functions must execute a Lambda task passing the raw text from `protocol-extracted-data` to Anthropic Claude Sonnet on Amazon Bedrock to extract all inclusion and exclusion rules into an itemized JSON array.
+* **[Approved] [REQ-F-06]:** Extracted protocol rules must be stored in an Amazon DynamoDB table (`study-protocols`), indexed by `StudyID`.
 
 ### 3.2 Patient Record Ingestion & Asynchronous OCR
-* **[Approved] [REQ-F-05]:** The system shall support uploading multi-file patient medical records by the Clinical Investigator under a single `PatientID` directory into an encrypted S3 bucket (`patient-data-upload`).
-* **[Approved] [REQ-F-06]:** Document uploads must initiate an AWS Step Functions state machine execution to manage long-running background tasks.
-* **[Approved] [REQ-F-07]:** Step Functions must execute a Map State to run Amazon Textract asynchronously (`StartDocumentAnalysis`) across all patient PDFs in parallel.
-* **[Approved] [REQ-F-08]:** Textract output files must be written to an intermediate S3 bucket (`patient-extracted-data`) before triggering the next ingestion step.
+* **[Approved] [REQ-F-07]:** The system shall support uploading multi-file patient medical records by the Clinical Investigator under a single `PatientID` directory into an encrypted S3 bucket (`patient-data-upload`).
+* **[Approved] [REQ-F-08]:** Document uploads must initiate an AWS Step Functions state machine execution to manage long-running background tasks.
+* **[Approved] [REQ-F-09]:** Step Functions must execute a Map State to run Amazon Textract asynchronously (`StartDocumentAnalysis`) across all patient PDFs in parallel.
+* **[Approved] [REQ-F-10]:** Textract output files must be written to an intermediate S3 bucket (`patient-extracted-data`) before triggering the next ingestion step.
 
 ### 3.3 RAG Indexing & Vector Storage
-* **[Approved] [REQ-F-09]:** The system shall invoke Amazon Bedrock Knowledge Bases (`StartIngestionJob`) to automatically chunk parsed patient text and generate embeddings using Amazon Titan Text Embeddings.
-* **[Approved] [REQ-F-10]:** Embeddings and chunk metadata must be stored in a serverless vector store (Amazon Bedrock Knowledge Bases / OpenSearch Serverless Vector Engine / S3 Vector storage) to eliminate fixed 24/7 idle database instance costs.
-* **[Approved] [REQ-F-11]:** Every stored vector chunk must maintain metadata tags for `patient_id`, `source_filename`, and `page_number` to enable document-level citations.
+* **[Approved] [REQ-F-11]:** The system shall invoke Amazon Bedrock Knowledge Bases (`StartIngestionJob`) to automatically chunk parsed patient text and generate embeddings using Amazon Titan Text Embeddings.
+* **[Approved] [REQ-F-12]:** Embeddings and chunk metadata must be stored in a serverless vector store (Amazon Bedrock Knowledge Bases / OpenSearch Serverless Vector Engine / S3 Vector storage) to eliminate fixed 24/7 idle database instance costs.
+* **[Approved] [REQ-F-13]:** Every stored vector chunk must maintain metadata tags for `patient_id`, `source_filename`, and `page_number` to enable document-level citations.
 
 ### 3.4 AI Reasoning & Eligibility Verdict Generation
-* **[Approved] [REQ-F-12]:** The system shall run a single **Amazon Bedrock Agent** to perform eligibility analysis. Multi-agent setups are explicitly excluded to maintain lower latency and cost.
-* **[Approved] [REQ-F-13]:** The agent must pull active inclusion and exclusion rules from DynamoDB and perform RAG queries against the vector index filtered by `patient_id`.
-* **[Approved] [REQ-F-14]:** The agent must evaluate rules across all uploaded patient documents simultaneously, using foundation model JSON Schema enforcement to output a structured verdict containing rule statuses (`MET`, `NOT_MET`, `UNCERTAIN`), direct quotes, source filenames, and page citations.
-* **[Approved] [REQ-F-15]:** The generated verdict must be saved to the `patient-verdicts` Amazon DynamoDB table.
+* **[Approved] [REQ-F-14]:** The system shall run a single **Amazon Bedrock Agent** to perform eligibility analysis. Multi-agent setups are explicitly excluded to maintain lower latency and cost.
+* **[Approved] [REQ-F-15]:** The agent must pull active inclusion and exclusion rules from DynamoDB and perform RAG queries against the vector index filtered by `patient_id`.
+* **[Approved] [REQ-F-16]:** The agent must evaluate rules across all uploaded patient documents simultaneously, using foundation model JSON Schema enforcement to output a structured verdict containing rule statuses (`MET`, `NOT_MET`, `UNCERTAIN`), direct quotes, source filenames, and page citations.
+* **[Approved] [REQ-F-17]:** The generated verdict must be saved to the `patient-verdicts` Amazon DynamoDB table.
 
 ### 3.5 Clinical Review Interface (Human-in-the-Loop)
-* **[Approved] [REQ-F-16]:** The Web UI must present a unified Clinical Investigator dashboard with a side-by-side view: an interactive PDF viewer on the left, and an AI criteria checklist on the right.
-* **[Approved] [REQ-F-17]:** Selecting any criterion or quote in the checklist must jump directly to the cited page and highlight text in the correct patient PDF.
-* **[Approved] [REQ-F-18]:** The Clinical Investigator must be provided with interactive controls (`Approve`, `Reject`, `Manual Override`, `Notes`) to log the binding determination.
+* **[Approved] [REQ-F-18]:** The Web UI must present a unified Clinical Investigator dashboard with a side-by-side view: an interactive PDF viewer on the left, and an AI criteria checklist on the right.
+* **[Approved] [REQ-F-19]:** Selecting any criterion or quote in the checklist must jump directly to the cited page and highlight text in the correct patient PDF.
+* **[Approved] [REQ-F-20]:** The Clinical Investigator must be provided with interactive controls (`Approve`, `Reject`, `Manual Override`, `Notes`) to log the binding determination.
 
 ---
 
@@ -69,8 +71,8 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 ### 5.1 Protocol Schema (`study-protocols` DynamoDB Table)
 ```json
 {
-  "Study_ID": "STRING (Partition Key)",
-  "Study_Name": "STRING",
+  "StudyID": "STRING (Partition Key)",
+  "StudyName": "STRING",
   "inclusion_criteria": [
     { "id": "STRING", "rule": "STRING" }
   ],
@@ -84,8 +86,8 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 ### 5.2 Verdict Schema (`patient-verdicts` DynamoDB Table)
 ```json
 {
-  "Patient_ID": "STRING (Partition Key)",
-  "Study_ID": "STRING (Sort Key)",
+  "PatientID": "STRING (Partition Key)",
+  "StudyID": "STRING (Sort Key)",
   "overall_recommendation": "ELIGIBLE | INELIGIBLE | MANUAL_REVIEW_REQUIRED",
   "criteria_evaluations": [
     {
