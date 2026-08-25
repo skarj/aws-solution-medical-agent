@@ -1,6 +1,6 @@
 ## 1. High-Level System Architecture
 
-The AI-Assisted Clinical Trial Screening Platform employs an asynchronous, event-driven, serverless architecture on AWS. The design eliminates 24/7 idle infrastructure costs while providing strict multi-tenant data isolation and HIPAA compliance.
+The AI-Assisted Clinical Trial Screening Platform employs an asynchronous, event-driven, serverless architecture deployed in AWS Region **`us-west-2` (Oregon)** (`[REQ-OPS-01]`). The design eliminates 24/7 idle infrastructure costs while providing strict multi-tenant data isolation, HIPAA compliance, and payload resiliency using the S3 Claim-Check pattern.
 
 ```mermaid
 graph LR
@@ -105,9 +105,9 @@ stateDiagram-v2
 
 ### 2.3 Detailed Pipeline Stages:
 1. **Document Ingestion (`[REQ-F-01]`):** The Clinical Investigator uploads `protocol.pdf` to `s3://protocol-data-upload/{StudyID}/`.
-2. **State Machine Execution Trigger (`[REQ-F-02]`):** S3 ObjectCreated event routes via Amazon EventBridge to launch the Protocol Onboarding Step Functions state machine with input `{StudyID, Bucket, Key}`.
+2. **State Machine Execution Trigger (`[REQ-F-02]`):** S3 ObjectCreated event routes via Amazon EventBridge to launch the Protocol Onboarding Step Functions state machine with input metadata `{StudyID, Bucket, Key}`.
 3. **Asynchronous Layout & Form OCR (`[REQ-F-02]`):** Step Functions starts Amazon Textract `StartDocumentAnalysis` with `TABLES` and `FORMS` feature types, pausing execution until Textract completes.
-4. **Structured Rule Extraction (`[REQ-F-03]`):** Step Functions executes a Lambda task passing the extracted text to an LLM on Amazon Bedrock (Amazon Nova Pro / Anthropic Claude 3.5 Sonnet) enforcing the itemized `study-protocols` JSON schema.
+4. **Structured Rule Extraction & Payload Safety (`[REQ-F-03]`):** Following the Claim-Check pattern to prevent exceeding the Step Functions 256 KB state limit, Step Functions passes S3 text object pointers to an AWS Lambda task. Lambda passes the extracted text to an LLM on Amazon Bedrock (Amazon Nova Pro / Anthropic Claude 3.5 Sonnet in `us-west-2`) enforcing the itemized `study-protocols` JSON schema.
 5. **Rule Persistence (`[REQ-F-04]`):** Structured rules are written to the `study-protocols` DynamoDB table under primary key `StudyID`.
 
 ---

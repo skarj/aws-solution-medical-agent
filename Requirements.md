@@ -59,6 +59,9 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 * **[Approved] [REQ-NF-02]:** RAG vector search retrieval times must remain under 2 seconds per query.
 * **[Approved] [REQ-NF-03]:** Step Functions must handle task retries, exponential backoffs, and dead-letter queues (DLQs) via Amazon SQS for failed Textract or Bedrock jobs.
 
+### 4.3 Operational & Regional Deployment
+* **[Approved] [REQ-OPS-01]:** All infrastructure, data storage, foundational model inference, and vector indexing must be deployed and execute strictly within AWS Region **`us-west-2` (Oregon)** in accordance with project operational defaults.
+
 ---
 
 ## 5. Database Schema Specifications
