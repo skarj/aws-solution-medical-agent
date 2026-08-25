@@ -116,20 +116,39 @@ All compute resources (Lambda, Step Functions, Bedrock Agents) operate under ded
 ```
 
 #### Protocol Rule Structurer Lambda Execution Role Policy (Excerpt) — Scoped to `[REQ-F-05]` Mandated Model:
-This role is intentionally distinct from the Bedrock Agent Execution Role below. `[REQ-F-05]` mandates Anthropic Claude Sonnet exclusively for one-time protocol rule extraction; least-privilege IAM enforces that mandate at the policy level (no Nova Pro ARN granted), rather than relying solely on prompt/application logic.
+This role is intentionally distinct from the Bedrock Agent Execution Role below. `[REQ-F-05]` mandates **Anthropic Claude Sonnet 5** exclusively for one-time protocol rule extraction (updated from a generic "Claude Sonnet" mandate on 2026-08-25); least-privilege IAM enforces that mandate at the policy level, rather than relying solely on prompt/application logic.
+
+**Resolved 2026-08-25 — updated for Claude Sonnet 5's cross-Region inference requirement:** Verified against `docs.aws.amazon.com`, Claude Sonnet 5 has no `bedrock-runtime` In-Region support in *any* AWS Region and can only be invoked via a Geographic (US) or Global cross-Region inference profile. `[REQ-OPS-01]` was relaxed to permit the Geographic (US) profile specifically (see `Requirements.md`). Per AWS's documented IAM pattern for Geographic cross-Region inference, the policy below grants `bedrock:InvokeModel` on both the inference-profile ARN and the underlying foundation-model ARN in the source Region and each destination Region the profile can route to, scoped with a `Condition` on `bedrock:InferenceProfileArn` so the foundation-model grant cannot be used outside that profile. The destination-Region list (`us-east-1`, `us-east-2`) is carried over from the equivalent table published for Claude Sonnet 4.5, since Claude Sonnet 5's own model-card page did not expose a per-source-Region breakdown at review time — **reconfirm this list against the live Bedrock console or `GetInferenceProfile` before production deployment**, and note AWS's Claude Sonnet 5 documentation describes the US profile as keeping data within "US and Canada," so a `ca-central-1` destination should also be verified/excluded if strict US-only residency is required.
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "AllowClaudeSonnetInvocationOnly",
+      "Sid": "AllowClaudeSonnet5GeoUsInferenceProfile",
       "Effect": "Allow",
       "Action": [
         "bedrock:InvokeModel"
       ],
       "Resource": [
-        "arn:aws:bedrock:*:*:foundation-model/anthropic.claude-3-5-sonnet-*"
+        "arn:aws:bedrock:us-west-2:*:inference-profile/us.anthropic.claude-sonnet-5"
       ]
+    },
+    {
+      "Sid": "AllowClaudeSonnet5FoundationModelAcrossGeoUsDestinations",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5",
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5",
+        "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "bedrock:InferenceProfileArn": "arn:aws:bedrock:us-west-2:*:inference-profile/us.anthropic.claude-sonnet-5"
+        }
+      }
     },
     {
       "Sid": "AllowDynamoDBWriteProtocolRules",

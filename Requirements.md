@@ -18,9 +18,9 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 ### 3.1 Protocol Onboarding & Structuring
 * **[Approved] [REQ-F-01]:** The system shall accept a single study protocol PDF (30–100 pages, searchable or scanned) uploaded by the Clinical Investigator via a web portal into an encrypted S3 bucket (`protocol-data-upload`).
 * **[Approved] [REQ-F-02]:** Protocol PDF upload events must automatically initiate an AWS Step Functions state machine execution to orchestrate asynchronous background processing.
-* **[Approved] [REQ-F-03]:** Step Functions shall route all uploaded protocol PDFs directly to Amazon Textract (`StartDocumentAnalysis`) to extract raw text, tables, and form layouts asynchronously, ensuring consistent layout parsing across digital, scanned, or faxed documents.
+* **[Approved] [REQ-F-03]:** Step Functions shall invoke Amazon Textract (aws-sdk:textract:startDocumentAnalysis) with the TABLES feature enabled (FeatureTypes=["TABLES"]) to extract raw text and preserve table structures. Step Functions shall manage job completion natively using a Wait/Choice polling loop (aws-sdk:textract:getDocumentAnalysis) before proceeding.
 * **[Approved] [REQ-F-04]:** Textract output files must be written to an intermediate S3 bucket (`protocol-extracted-data`) before triggering the next ingestion step.
-* **[Approved] [REQ-F-05]:** Step Functions must execute a Lambda task passing the raw text from `protocol-extracted-data` S3 bucket to Anthropic Claude Sonnet on Amazon Bedrock to extract all inclusion and exclusion rules into an itemized JSON array.
+* **[Approved] [REQ-F-05]:** Step Functions must execute a Lambda task passing the raw text from `protocol-extracted-data` S3 bucket to Anthropic Claude Sonnet 5 on Amazon Bedrock to extract all inclusion and exclusion rules into an itemized JSON array.
 	* **Model Selection Justification (Anthropic Claude Sonnet):** Protocol parsing is a high-stakes, one-time operation per study. Anthropic Claude Sonnet is mandated due to its superior clinical reasoning over 100-page context windows and strict JSON Schema compliance. Using Sonnet prevents misinterpretations or dropped criteria that would compromise all downstream patient evaluations, delivering maximum extraction accuracy for pennies per trial setup.
 * **[Approved] [REQ-F-06]:** Extracted protocol rules must be stored in an Amazon DynamoDB table (`study-protocols`), indexed by `StudyID`.
 	* **Architectural Justification (DynamoDB vs. Bedrock Knowledge Base):** Protocol rules are intentionally stored as structured records in DynamoDB rather than indexed into an Amazon Bedrock Knowledge Base (vector database). This guarantees deterministic, 100% evaluation coverage of all criteria per patient run (preventing vector similarity search from accidentally missing edge-case rules), eliminates redundant vector query costs during screening, and provides a static, schema-validated checklist directly to the Web UI for clinical review.
@@ -28,7 +28,7 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 ### 3.2 Patient Record Ingestion & Asynchronous OCR
 * **[Approved] [REQ-F-07]:** The system shall support uploading multi-file patient medical records by the Clinical Investigator under a single `PatientID` directory into an encrypted S3 bucket (`patient-data-upload`).
 * **[Approved] [REQ-F-08]:** Document uploads must initiate an AWS Step Functions state machine execution to manage long-running background tasks.
-* **[Approved] [REQ-F-09]:** Step Functions shall route all patient PDF records directly to Amazon Textract (`StartDocumentAnalysis`) to extract raw text, tables, and form layouts asynchronously, ensuring OCR coverage for hybrid/scanned pages and preserving lab table structures.
+* **[Approved] [REQ-F-09]:** Step Functions shall route all patient PDF records through a Map state to execute Amazon Textract (aws-sdk:textract:startDocumentAnalysis) with FeatureTypes=["TABLES"] across files in parallel. Each parallel execution branch shall manage job completion using a native Step Functions Wait/Choice polling loop.
 * **[Approved] [REQ-F-10]:** Textract output files must be written to an intermediate S3 bucket (`patient-extracted-data`) before triggering the next ingestion step.
 
 ### 3.3 RAG Indexing & Vector Storage
@@ -65,7 +65,7 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 * **[Approved] [REQ-NF-03]:** Step Functions must handle task retries, exponential backoffs, and dead-letter queues (DLQs) via Amazon SQS for failed Textract or Bedrock jobs.
 
 ### 4.3 Operational & Regional Deployment
-* **[Approved] [REQ-OPS-01]:** All infrastructure, data storage, foundational model inference, and vector indexing must be deployed and execute strictly within AWS Region **`us-west-2` (Oregon)** in accordance with project operational defaults.
+* **[Approved] [REQ-OPS-01]:** All infrastructure, data storage, and vector indexing must be deployed and execute strictly within AWS Region **`us-west-2` (Oregon)**. Amazon Bedrock foundation model inference must originate from `us-west-2`. It must execute In-Region where the mandated model supports it, and where a mandated model has no `us-west-2` In-Region support, invocation via an AWS **Geographic (US) cross-Region inference profile** (`us.`-prefixed) is permitted. **Global** cross-Region inference is not permitted.
 
 ### 4.4 Observability
 -  **[Draft] [REQ-OBS-01]:** TODO: Metrics, logs, traces
