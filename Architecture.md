@@ -4,24 +4,13 @@ The AI-Assisted Clinical Trial Screening Platform employs an asynchronous, event
 
 ```mermaid
 graph LR
-    subgraph Client_Tier ["User and Client Interface"]
-        WEB["Clinical Investigator Portal"]
-    end
-
-    subgraph Ingestion_Tier ["Storage and Async Ingestion"]
-        S3["Amazon S3 Buckets"]
-        SFN["AWS Step Functions State Machines"]
-        OCR["Amazon Textract OCR"]
-    end
-
-    subgraph AI_Engine_Tier ["RAG and AI Reasoning Engine"]
-        KB["Bedrock Knowledge Base and Vectors"]
-        AGENT["Bedrock Reasoning Agent"]
-    end
-
-    subgraph Persistence_Tier ["Structured Persistence and Audit"]
-        DDB["Amazon DynamoDB Tables"]
-    end
+    WEB["Clinical Investigator Portal"]
+    S3["Amazon S3 Buckets"]
+    SFN["AWS Step Functions State Machines"]
+    OCR["Amazon Textract OCR"]
+    KB["Bedrock Knowledge Base and Vectors"]
+    AGENT["Bedrock Reasoning Agent"]
+    DDB["Amazon DynamoDB Tables"]
 
     WEB -->|"Uploads Records and Protocols"| S3
     S3 -->|"Triggers State Machines"| SFN
@@ -42,24 +31,16 @@ This workflow parses a clinical study protocol PDF (30–100 pages) during trial
 
 ```mermaid
 graph TD
-    subgraph Coordinator_Tier ["Clinical Investigator Action"]
-        USER["Clinical Investigator"]
-        S3_PROTO["S3: protocol-data-upload"]
-        EV_BRIDGE["Amazon EventBridge"]
-    end
-
-    subgraph Step_Functions_Tier ["AWS Step Functions Orchestration"]
-        SFN_PROTO["Protocol Onboarding State Machine"]
-        S3_PROTO_EXTRACTED["S3: protocol-extracted-data"]
-        LAMBDA_STRUCT["Lambda: Rule Extraction Task"]
-        SQS_DLQ["Amazon SQS Dead Letter Queue"]
-    end
-
-    subgraph External_Services ["Managed AI and Persistence Services"]
-        TEXTRACT["Amazon Textract StartDocumentAnalysis"]
-        BEDROCK_LLM["Amazon Bedrock Anthropic Claude Sonnet"]
-        DDB_PROTO["DynamoDB: study-protocols Table"]
-    end
+    USER["Clinical Investigator"]
+    S3_PROTO["S3: protocol-data-upload"]
+    EV_BRIDGE["Amazon EventBridge"]
+    SFN_PROTO["Protocol Onboarding State Machine"]
+    S3_PROTO_EXTRACTED["S3: protocol-extracted-data"]
+    LAMBDA_STRUCT["Lambda: Rule Extraction Task"]
+    SQS_DLQ["Amazon SQS Dead Letter Queue"]
+    TEXTRACT["Amazon Textract StartDocumentAnalysis"]
+    BEDROCK_LLM["Amazon Bedrock Anthropic Claude Sonnet"]
+    DDB_PROTO["DynamoDB: study-protocols Table"]
 
     USER -->|"Uploads protocol.pdf"| S3_PROTO
     S3_PROTO -->|"S3 ObjectCreated Event"| EV_BRIDGE
@@ -125,31 +106,20 @@ This workflow processes multi-file patient records (up to 150 MB total, digital 
 
 ```mermaid
 graph TD
-    subgraph Ingestion_Trigger ["Multi-File Ingestion"]
-        CLINICIAN["Clinical Investigator"]
-        S3_PATIENT["S3: patient-data-upload/{PatientID}/"]
-        EV_BRIDGE["Amazon EventBridge"]
-    end
-
-    subgraph State_Machine ["AWS Step Functions Orchestration"]
-        SFN_START["Execution Start: PatientID, StudyID"]
-        MAP_OCR["Map State: Parallel OCR"]
-        S3_EXTRACT["S3: patient-extracted-data"]
-        KB_INGEST["Bedrock KB StartIngestionJob"]
-        INVOKE_AGENT["Invoke Single Bedrock Agent"]
-        SQS_DLQ["Amazon SQS Dead Letter Queue"]
-    end
-
-    subgraph AI_RAG_Services ["AI and Vector Engine"]
-        TEXTRACT_ASYNC["Amazon Textract Async Jobs"]
-        TITAN_EMB["Titan Embeddings v2 and Vector Store"]
-        DDB_PROTO["DynamoDB: study-protocols"]
-        BEDROCK_AGENT["Amazon Bedrock Reasoning Agent"]
-    end
-
-    subgraph Persistence ["Verdict Storage"]
-        DDB_VERDICT["DynamoDB: patient-verdicts Table"]
-    end
+    CLINICIAN["Clinical Investigator"]
+    S3_PATIENT["S3: patient-data-upload/{PatientID}/"]
+    EV_BRIDGE["Amazon EventBridge"]
+    SFN_START["Execution Start: PatientID, StudyID"]
+    MAP_OCR["Map State: Parallel OCR"]
+    S3_EXTRACT["S3: patient-extracted-data"]
+    KB_INGEST["Bedrock KB StartIngestionJob"]
+    INVOKE_AGENT["Invoke Single Bedrock Agent"]
+    SQS_DLQ["Amazon SQS Dead Letter Queue"]
+    TEXTRACT_ASYNC["Amazon Textract Async Jobs"]
+    TITAN_EMB["Titan Embeddings v2 and Vector Store"]
+    DDB_PROTO["DynamoDB: study-protocols"]
+    BEDROCK_AGENT["Amazon Bedrock Reasoning Agent"]
+    DDB_VERDICT["DynamoDB: patient-verdicts Table"]
 
     CLINICIAN -->|"Uploads Multi-PDF Records"| S3_PATIENT
     S3_PATIENT -->|"ObjectCreated Event"| EV_BRIDGE
@@ -227,21 +197,13 @@ This workflow describes the Clinical Investigator review process for reviewing A
 
 ```mermaid
 graph TD
-    subgraph Client_App ["Clinical Investigator Dashboard"]
-        DOCTOR["Clinical Investigator"]
-        UI_VIEW["React / Next.js Web UI"]
-    end
-
-    subgraph API_Edge ["API and Security Gateway"]
-        COGNITO["Amazon Cognito MFA / RBAC"]
-        APIGW["Amazon API Gateway REST"]
-        LAMBDA_REV["AWS Lambda: Review API Handler"]
-    end
-
-    subgraph Data_Sources ["Protected Storage and Verdict Data"]
-        DDB_VERDICT["DynamoDB: patient-verdicts"]
-        S3_PATIENT["S3: patient-data-upload Encrypted"]
-    end
+    DOCTOR["Clinical Investigator"]
+    UI_VIEW["React / Next.js Web UI"]
+    COGNITO["Amazon Cognito MFA / RBAC"]
+    APIGW["Amazon API Gateway REST"]
+    LAMBDA_REV["AWS Lambda: Review API Handler"]
+    DDB_VERDICT["DynamoDB: patient-verdicts"]
+    S3_PATIENT["S3: patient-data-upload Encrypted"]
 
     DOCTOR -->|"Authenticates via MFA and RBAC"| COGNITO
     COGNITO -->|"Issues Bearer JWT"| UI_VIEW
