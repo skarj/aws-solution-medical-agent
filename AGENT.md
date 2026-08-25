@@ -1,5 +1,3 @@
-# AGENT.md
-
 ## Purpose
 Guide the LLM agent in maintaining AWS solution architecture documentation using a **Human Specifier, Agent Implementer** pattern. The human defines intent, business constraints, and approvals; the agent executes downstream technical analysis, diagramming, pricing calculations, and repository updates.
 
@@ -14,6 +12,9 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 * `Security.md` — **[Agent-Owned]** IAM policies, encryption standards, network isolation, and compliance controls.
 * `Services.md` — **[Agent-Owned]** AWS service inventory paired with official AWS documentation links.
 * `Log.md` — **[Agent-Exclusive Write]** Append-only audit trail of all repository modifications.
+
+## Tool-Assisted Documentation (MCP Integration)
+* When updating `Services.md`, `Security.md`, or `Architecture.md`, invoke the `aws-docs-mcp` (or equivalent documentation lookup tool) to query official AWS documentation.
 
 ## Core Rules & Instructions
 
@@ -58,6 +59,8 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 
 ### 9. Documentation Verification
 * Ensure every AWS service listed in `Services.md` links to official AWS documentation (domain: `docs.aws.amazon.com`).
+* **URL Validation**: Every AWS service listed in `Services.md` must feature a live link retrieved directly via documentation MCP queries under `docs.aws.amazon.com`.
+* **Exact Syntax Verification**: Verify IAM action names, Step Functions task definitions, and service quotas via documentation search before committing updates to `Security.md` or `Architecture.md`.
 
 ### 10. AWS Well-Architected Guardrail
 * Prior to committing updates, evaluate designs against AWS Well-Architected Framework pillars.

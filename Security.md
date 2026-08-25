@@ -115,7 +115,45 @@ All compute resources (Lambda, Step Functions, Bedrock Agents) operate under ded
 }
 ```
 
+#### Protocol Rule Structurer Lambda Execution Role Policy (Excerpt) — Scoped to `[REQ-F-05]` Mandated Model:
+This role is intentionally distinct from the Bedrock Agent Execution Role below. `[REQ-F-05]` mandates Anthropic Claude Sonnet exclusively for one-time protocol rule extraction; least-privilege IAM enforces that mandate at the policy level (no Nova Pro ARN granted), rather than relying solely on prompt/application logic.
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowClaudeSonnetInvocationOnly",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:*:*:foundation-model/anthropic.claude-3-5-sonnet-*"
+      ]
+    },
+    {
+      "Sid": "AllowDynamoDBWriteProtocolRules",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem"
+      ],
+      "Resource": "arn:aws:dynamodb:*:*:table/study-protocols"
+    },
+    {
+      "Sid": "AllowKMSDecrypt",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Decrypt",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "arn:aws:kms:*:*:key/*"
+    }
+  ]
+}
+```
+
 #### Bedrock Agent Execution Role Policy (Excerpt):
+This role serves the single patient-screening Bedrock Agent (`[REQ-F-14, REQ-F-16]`), which has no mandated model — Nova Pro and Claude 3.5 Sonnet remain valid alternatives for verdict generation, unlike the protocol extraction role above.
 ```json
 {
   "Version": "2012-10-17",

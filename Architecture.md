@@ -50,13 +50,14 @@ graph TD
 
     subgraph Step_Functions_Tier ["AWS Step Functions Orchestration"]
         SFN_PROTO["Protocol Onboarding State Machine"]
+        S3_PROTO_EXTRACTED["S3: protocol-extracted-data"]
         LAMBDA_STRUCT["Lambda: Rule Extraction Task"]
         SQS_DLQ["Amazon SQS Dead Letter Queue"]
     end
 
     subgraph External_Services ["Managed AI and Persistence Services"]
         TEXTRACT["Amazon Textract StartDocumentAnalysis"]
-        BEDROCK_LLM["Amazon Bedrock Nova / Claude Sonnet"]
+        BEDROCK_LLM["Amazon Bedrock Anthropic Claude Sonnet"]
         DDB_PROTO["DynamoDB: study-protocols Table"]
     end
 
@@ -64,8 +65,10 @@ graph TD
     S3_PROTO -->|"S3 ObjectCreated Event"| EV_BRIDGE
     EV_BRIDGE -->|"Triggers Execution StudyID"| SFN_PROTO
     SFN_PROTO -->|"StartDocumentAnalysis"| TEXTRACT
-    TEXTRACT -->|"Returns Tables and Text"| SFN_PROTO
-    SFN_PROTO -->|"Invokes Task with Extracted Text"| LAMBDA_STRUCT
+    TEXTRACT -->|"Writes Extracted Text"| S3_PROTO_EXTRACTED
+    TEXTRACT -->|"Job Complete Callback"| SFN_PROTO
+    SFN_PROTO -->|"Invokes Task with S3 Pointer"| LAMBDA_STRUCT
+    LAMBDA_STRUCT -->|"Reads Extracted Text"| S3_PROTO_EXTRACTED
     LAMBDA_STRUCT -->|"Prompts with JSON Schema"| BEDROCK_LLM
     BEDROCK_LLM -->|"Returns Structured Rules JSON"| LAMBDA_STRUCT
     LAMBDA_STRUCT -->|"PutItem StudyID, Rules"| DDB_PROTO
@@ -81,6 +84,7 @@ stateDiagram-v2
     state "Start Textract Async OCR Task" as StartProtocolOcr
     state "Wait for Textract Completion Callback" as WaitForProtocolOcr
     state "Check OCR Status" as CheckProtocolOcr <<choice>>
+    state "Save Extracted Text to S3 protocol-extracted-data" as SaveProtocolText
     state "Execute Lambda Rule Structurer Task" as LambdaExtractRules
     state "Invoke Bedrock Model JSON Enforcement" as BedrockRulePrompt
     state "PutItem to study-protocols Table" as PersistProtocolRules
@@ -90,10 +94,11 @@ stateDiagram-v2
     StartProtocolOcr --> WaitForProtocolOcr: StartDocumentAnalysis(Tables, Forms)
     WaitForProtocolOcr --> CheckProtocolOcr: Task Token Received
     
-    CheckProtocolOcr --> LambdaExtractRules: OCR Status == SUCCEEDED
+    CheckProtocolOcr --> SaveProtocolText: OCR Status == SUCCEEDED
     CheckProtocolOcr --> StartProtocolOcr: Catch [Transient Error - Retry with Backoff]
     CheckProtocolOcr --> ProtocolErrorState: OCR Status == FAILED / Retries Exhausted
 
+    SaveProtocolText --> LambdaExtractRules: Write Extracted Text to S3
     LambdaExtractRules --> BedrockRulePrompt: Send Formatted Markdown Text
     BedrockRulePrompt --> PersistProtocolRules: Valid Structured JSON Rules Returned
     BedrockRulePrompt --> LambdaExtractRules: Catch [Throttling / Retry with Backoff]
@@ -107,7 +112,7 @@ stateDiagram-v2
 1. **Document Ingestion (`[REQ-F-01]`):** The Clinical Investigator uploads `protocol.pdf` to `s3://protocol-data-upload/{StudyID}/`.
 2. **State Machine Execution Trigger (`[REQ-F-02]`):** S3 ObjectCreated event routes via Amazon EventBridge to launch the Protocol Onboarding Step Functions state machine with input metadata `{StudyID, Bucket, Key}`.
 3. **Asynchronous Layout & Form OCR (`[REQ-F-03]`):** Step Functions starts Amazon Textract `StartDocumentAnalysis` with `TABLES` and `FORMS` feature types, pausing execution until Textract completes.
-4. **Structured Rule Extraction & Payload Safety (`[REQ-F-04, REQ-F-05]`):** Following the Claim-Check pattern to prevent exceeding the Step Functions 256 KB state limit, Step Functions passes S3 text object pointers (`protocol-extracted-data`) to an AWS Lambda task. Lambda passes the extracted text to an LLM on Amazon Bedrock (Amazon Nova Pro / Anthropic Claude 3.5 Sonnet in `us-west-2`) enforcing the itemized `study-protocols` JSON schema.
+4. **Structured Rule Extraction & Payload Safety (`[REQ-F-04, REQ-F-05]`):** Textract writes OCR output to the intermediate `protocol-extracted-data` S3 bucket immediately upon job completion. Following the Claim-Check pattern to prevent exceeding the Step Functions 256 KB state limit, Step Functions passes only the S3 object pointer to an AWS Lambda task, which reads the extracted text and sends it to **Anthropic Claude Sonnet** on Amazon Bedrock (`us-west-2`) — the model mandated by `[REQ-F-05]` — enforcing the itemized `study-protocols` JSON schema.
 5. **Rule Persistence (`[REQ-F-06]`):** Structured rules are written to the `study-protocols` DynamoDB table under primary key `StudyID`.
 
 ---
