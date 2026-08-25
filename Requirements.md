@@ -18,7 +18,7 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 ### 3.1 Protocol Onboarding & Structuring
 * **[Approved] [REQ-F-01]:** The system shall accept a single study protocol PDF (30–100 pages, searchable or scanned) uploaded by the Clinical Investigator via a web portal into an encrypted S3 bucket (`protocol-data-upload`).
 * **[Approved] [REQ-F-02]:** Protocol PDF upload events must automatically initiate an AWS Step Functions state machine execution to orchestrate asynchronous background processing.
-* **[Approved] [REQ-F-03]:** Step Functions must invoke Amazon Textract asynchronously (`StartDocumentAnalysis`) to extract text, tables, and form data from the protocol PDF.
+* **[Approved] [REQ-F-03]:** Step Functions shall route all uploaded protocol PDFs directly to Amazon Textract (`StartDocumentAnalysis`) to extract raw text, tables, and form layouts asynchronously, ensuring consistent layout parsing across digital, scanned, or faxed documents.
 * **[Approved] [REQ-F-04]:** Textract output files must be written to an intermediate S3 bucket (`protocol-extracted-data`) before triggering the next ingestion step.
 * **[Approved] [REQ-F-05]:** Step Functions must execute a Lambda task passing the raw text from `protocol-extracted-data` S3 bucket to Anthropic Claude Sonnet on Amazon Bedrock to extract all inclusion and exclusion rules into an itemized JSON array.
 	* **Model Selection Justification (Anthropic Claude Sonnet):** Protocol parsing is a high-stakes, one-time operation per study. Anthropic Claude Sonnet is mandated due to its superior clinical reasoning over 100-page context windows and strict JSON Schema compliance. Using Sonnet prevents misinterpretations or dropped criteria that would compromise all downstream patient evaluations, delivering maximum extraction accuracy for pennies per trial setup.
@@ -28,12 +28,12 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 ### 3.2 Patient Record Ingestion & Asynchronous OCR
 * **[Approved] [REQ-F-07]:** The system shall support uploading multi-file patient medical records by the Clinical Investigator under a single `PatientID` directory into an encrypted S3 bucket (`patient-data-upload`).
 * **[Approved] [REQ-F-08]:** Document uploads must initiate an AWS Step Functions state machine execution to manage long-running background tasks.
-* **[Approved] [REQ-F-09]:** Step Functions must execute a Map State to run Amazon Textract asynchronously (`StartDocumentAnalysis`) across all patient PDFs in parallel.
+* **[Approved] [REQ-F-09]:** Step Functions shall route all patient PDF records directly to Amazon Textract (`StartDocumentAnalysis`) to extract raw text, tables, and form layouts asynchronously, ensuring OCR coverage for hybrid/scanned pages and preserving lab table structures.
 * **[Approved] [REQ-F-10]:** Textract output files must be written to an intermediate S3 bucket (`patient-extracted-data`) before triggering the next ingestion step.
 
 ### 3.3 RAG Indexing & Vector Storage
 * **[Approved] [REQ-F-11]:** The system shall invoke Amazon Bedrock Knowledge Bases (`StartIngestionJob`) to automatically chunk parsed patient text and generate embeddings using Amazon Titan Text Embeddings.
-* **[Approved] [REQ-F-12]:** Embeddings and chunk metadata must be stored in a serverless vector store (Amazon Bedrock Knowledge Bases / OpenSearch Serverless Vector Engine / S3 Vector storage) to eliminate fixed 24/7 idle database instance costs.
+* **[Approved] [REQ-F-12]:** Embeddings and chunk metadata must be stored in Amazon S3 Vectors via Amazon Bedrock Knowledge Bases to eliminate fixed 24/7 idle database instance costs.
 * **[Approved] [REQ-F-13]:** Every stored vector chunk must maintain metadata tags for `patient_id`, `source_filename`, and `page_number` to enable document-level citations.
 
 ### 3.4 AI Reasoning & Eligibility Verdict Generation
@@ -57,6 +57,7 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 * **[Approved] [REQ-SEC-03]:** The AWS cloud infrastructure must operate under a signed AWS Business Associate Addendum (BAA).
 * **[Approved] [REQ-SEC-04]:** Authentication and access control must be managed via Amazon Cognito User Pools with Role-Based Access Control (RBAC) and Multi-Factor Authentication (MFA) enforced.
 * **[Approved] [REQ-SEC-05]:** AWS CloudTrail and Amazon CloudWatch must record all document access requests, API calls, and administrative actions for regulatory compliance and immutable audit logging.
+* **[Draft] [REQ-SEC-06]:** TODO: Audit Trails to DynamoDB
 
 ### 4.2 Performance & Reliability
 * **[Approved] [REQ-NF-01]:** Background ingestion and screening of multi-file patient records (up to 150 MB total) must complete within 10 minutes.
@@ -65,6 +66,9 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 
 ### 4.3 Operational & Regional Deployment
 * **[Approved] [REQ-OPS-01]:** All infrastructure, data storage, foundational model inference, and vector indexing must be deployed and execute strictly within AWS Region **`us-west-2` (Oregon)** in accordance with project operational defaults.
+
+### 4.4 Observability
+-  **[Draft] [REQ-OBS-01]:** TODO: Metrics, logs, traces
 
 ---
 

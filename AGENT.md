@@ -13,24 +13,23 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 * `Services.md` — **[Agent-Owned]** AWS service inventory paired with official AWS documentation links.
 * `Log.md` — **[Agent-Exclusive Write]** Append-only audit trail of all repository modifications.
 
-## Tool-Assisted Documentation (MCP Integration)
-* When updating `Services.md`, `Security.md`, or `Architecture.md`, invoke the `aws-docs-mcp` (or equivalent documentation lookup tool) to query official AWS documentation.
-
 ## Core Rules & Instructions
 
 ### 1. Permissions & Boundaries
 * **Read-Only Files**: Never modify `AGENT.md`.
 * **Requirement Protection**: Never edit, rewrite, or set an existing `[Approved]` requirement to `[Deprecated]` without direct, explicit human instruction.
+* **Repository Initialization**: If required documentation files do not exist during initial execution, create them using standard empty scaffolding before proceeding.
 
 ### 2. Single-Directional Workflow
 * All system changes must originate in `Requirements.md`. 
 * When scope shifts, propagate updates strictly downstream in this sequence:
   `Requirements.md` → `Architecture.md` / `Security.md` → `Cost.md` → `Services.md` → `Log.md`
 
-### 3. State-Gated Execution
+### 3. State-Gated Execution & Conflict Handling
 * Maintain explicit states for all entries in `Requirements.md`: `[Draft]`, `[Approved]`, or `[Deprecated]`.
 * Human inputs and initial agent-suggested requirements default to `[Draft]`.
 * **Only generate or modify downstream architectural components, security rules, or cost models for requirements marked `[Approved]`.**
+* **Conflict Resolution**: If new human inputs in `Requirements.md` conflict with existing approved requirements or SLAs, flag the contradiction to the human and request clarification before editing downstream files.
 
 ### 4. Traceability & Tagging
 * Assign unique tags to all requirements: `[REQ-F-XX]` (Functional), `[REQ-NF-XX]` (Non-Functional), `[REQ-SEC-XX]` (Security), `[REQ-OPS-XX]` (Operational), `[REQ-COST-XX]` (Budgetary).
@@ -57,8 +56,8 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 * **MCP Fallback**: If pricing MCP tools are unavailable, clearly mark estimates as `[Estimated - Unverified]` and document standard unit pricing assumptions.
 * Derive all quantitative pricing parameters (e.g., IOPS, GB/month runtime, API requests/sec) directly from capacity goals in `Requirements.md`.
 
-### 9. Documentation Verification
-* Ensure every AWS service listed in `Services.md` links to official AWS documentation (domain: `docs.aws.amazon.com`).
+### 9. Tool-Assisted Documentation Verification (MCP Integration)
+* **Live Search**: When updating `Services.md`, `Security.md`, or `Architecture.md`, invoke `aws-docs-mcp` to query official AWS documentation.
 * **URL Validation**: Every AWS service listed in `Services.md` must feature a live link retrieved directly via documentation MCP queries under `docs.aws.amazon.com`.
 * **Exact Syntax Verification**: Verify IAM action names, Step Functions task definitions, and service quotas via documentation search before committing updates to `Security.md` or `Architecture.md`.
 
