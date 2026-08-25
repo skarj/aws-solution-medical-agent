@@ -1,6 +1,6 @@
 ## 1. Executive Summary & Objective
 The AI-Assisted Clinical Trial Screening Platform automates patient eligibility assessment by analyzing unstructured medical records and matching them against trial inclusion and exclusion criteria. 
-The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI automates data extraction, protocol matching, and citation mapping, while licensed clinical personnel retain full authority over final trial enrollment decisions.
+The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI automates data extraction, protocol matching, and citation mapping, while the **Clinical Investigator** retains full authority over final trial enrollment decisions across protocol onboarding, patient record upload, and eligibility review.
 
 ---
 
@@ -16,13 +16,13 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 ## 3. Functional Requirements
 
 ### 3.1 Protocol Onboarding & Structuring
-* **[Approved] [REQ-F-01]:** The system shall accept a single study protocol PDF (30–100 pages) via a web portal into an encrypted S3 bucket (`protocol-data-upload`).
+* **[Approved] [REQ-F-01]:** The system shall accept a single study protocol PDF (30–100 pages) uploaded by the Clinical Investigator via a web portal into an encrypted S3 bucket (`protocol-data-upload`).
 * **[Approved] [REQ-F-02]:** Protocol PDF upload events must automatically initiate an AWS Step Functions state machine execution to orchestrate asynchronous background processing.
 * **[Approved] [REQ-F-03]:** Step Functions must execute a Lambda task passing the extracted protocol text to an LLM on Amazon Bedrock (such as Amazon Nova Pro or Anthropic Claude Sonnet) to extract all inclusion and exclusion rules into an itemized JSON array.
 * **[Approved] [REQ-F-04]:** Extracted protocol rules must be stored in an Amazon DynamoDB table (`study-protocols`), indexed by `StudyID`.
 
 ### 3.2 Patient Record Ingestion & Asynchronous OCR
-* **[Approved] [REQ-F-05]:** The system shall support uploading multi-file patient medical records under a single `PatientID` directory into an encrypted S3 bucket (`patient-data-upload`).
+* **[Approved] [REQ-F-05]:** The system shall support uploading multi-file patient medical records by the Clinical Investigator under a single `PatientID` directory into an encrypted S3 bucket (`patient-data-upload`).
 * **[Approved] [REQ-F-06]:** Document uploads must initiate an AWS Step Functions state machine execution to manage long-running background tasks.
 * **[Approved] [REQ-F-07]:** Step Functions must execute a Map State to run Amazon Textract asynchronously (`StartDocumentAnalysis`) across all patient PDFs in parallel.
 * **[Approved] [REQ-F-08]:** Textract output files must be written to an intermediate S3 bucket (`patient-extracted-data`) before triggering the next ingestion step.
@@ -39,9 +39,9 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 * **[Approved] [REQ-F-15]:** The generated verdict must be saved to the `patient-verdicts` Amazon DynamoDB table.
 
 ### 3.5 Clinical Review Interface (Human-in-the-Loop)
-* **[Approved] [REQ-F-16]:** The Web UI must present a side-by-side view: an interactive PDF viewer on the left, and an AI criteria checklist on the right.
+* **[Approved] [REQ-F-16]:** The Web UI must present a unified Clinical Investigator dashboard with a side-by-side view: an interactive PDF viewer on the left, and an AI criteria checklist on the right.
 * **[Approved] [REQ-F-17]:** Selecting any criterion or quote in the checklist must jump directly to the cited page and highlight text in the correct patient PDF.
-* **[Approved] [REQ-F-18]:** Clinical staff must be provided with interactive controls (`Approve`, `Reject`, `Manual Override`, `Notes`) to log the binding determination.
+* **[Approved] [REQ-F-18]:** The Clinical Investigator must be provided with interactive controls (`Approve`, `Reject`, `Manual Override`, `Notes`) to log the binding determination.
 
 ---
 

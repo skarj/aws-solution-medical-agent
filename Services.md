@@ -10,7 +10,7 @@ The AI-Assisted Clinical Trial Screening Platform relies on the following offici
 | :--- | :--- | :--- | :--- |
 | **AWS Step Functions** | Serverless state machines orchestrating protocol onboarding OCR/rule parsing and patient multi-file screening pipelines. | `[REQ-F-02]`, `[REQ-F-03]`, `[REQ-F-06]`, `[REQ-F-07]`, `[REQ-NF-01]`, `[REQ-NF-03]` | [AWS Step Functions Documentation](https://docs.aws.amazon.com/step-functions/) |
 | **AWS Lambda** | Event-driven microservices for S3 event routing, rule parsing, API handlers, and Bedrock Agent actions. | `[REQ-F-03]`, `[REQ-F-12]`, `[REQ-SEC-04]` | [AWS Lambda Documentation](https://docs.aws.amazon.com/lambda/) |
-| **Amazon API Gateway** | Managed REST API edge providing authenticated clinician access and presigned URL generation. | `[REQ-F-16]`, `[REQ-SEC-02]`, `[REQ-SEC-04]` | [Amazon API Gateway Documentation](https://docs.aws.amazon.com/apigateway/) |
+| **Amazon API Gateway** | Managed REST API edge providing authenticated Clinical Investigator access and presigned URL generation. | `[REQ-F-16]`, `[REQ-SEC-02]`, `[REQ-SEC-04]` | [Amazon API Gateway Documentation](https://docs.aws.amazon.com/apigateway/) |
 | **Amazon EventBridge** | Serverless event bus routing S3 document upload events to Step Functions executions. | `[REQ-F-06]` | [Amazon EventBridge Documentation](https://docs.aws.amazon.com/eventbridge/) |
 
 ---
@@ -43,6 +43,6 @@ The AI-Assisted Clinical Trial Screening Platform relies on the following offici
 | AWS Service | Architecture Role | Governing Requirements | Official Documentation |
 | :--- | :--- | :--- | :--- |
 | **AWS Key Management Service (AWS KMS)** | Customer-Managed Keys (CMK) managing cryptographic keys for S3, DynamoDB, and log encryption. | `[REQ-SEC-01]` | [AWS KMS Documentation](https://docs.aws.amazon.com/kms/) |
-| **Amazon Cognito** | User directory and authentication service enforcing Multi-Factor Authentication (MFA) and RBAC. | `[REQ-SEC-04]` | [Amazon Cognito Documentation](https://docs.aws.amazon.com/cognito/) |
+| **Amazon Cognito** | User directory and authentication service enforcing Multi-Factor Authentication (MFA) and Clinical Investigator role permissions. | `[REQ-SEC-04]` | [Amazon Cognito Documentation](https://docs.aws.amazon.com/cognito/) |
 | **AWS CloudTrail** | Regulatory auditing service logging management and S3/KMS data events. | `[REQ-SEC-05]` | [AWS CloudTrail Documentation](https://docs.aws.amazon.com/cloudtrail/) |
 | **Amazon CloudWatch** | Centralized logging, metrics collection, and alerting for Step Functions and Lambda execution. | `[REQ-SEC-05]` | [Amazon CloudWatch Documentation](https://docs.aws.amazon.com/cloudwatch/) |

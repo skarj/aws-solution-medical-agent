@@ -62,10 +62,9 @@ The AI-Assisted Clinical Trial Screening Platform processes Protected Health Inf
 ## 3. Identity, Access Management & RBAC (`[REQ-SEC-04]`)
 
 ### 3.1 User Authentication & Authorization
-* **Amazon Cognito User Pool:** Clinical staff and trial coordinators authenticate via Amazon Cognito with mandatory Multi-Factor Authentication (MFA - SMS/TOTP).
-* **RBAC - StudyCoordinator:** Authorized to upload protocols, initiate new studies, and view protocol parsing statuses.
-* **RBAC - ClinicalReviewer:** Authorized to view patient screening results, access presigned URLs for patient PDFs, and submit binding determinations (`Approve`, `Reject`, `Override`).
-* **RBAC - SecurityAuditor:** Read-only access to CloudTrail audit logs and compliance dashboards.
+* **Amazon Cognito User Pool:** Clinical personnel authenticate via Amazon Cognito with mandatory Multi-Factor Authentication (MFA - SMS/TOTP).
+* **RBAC - ClinicalInvestigator:** Single unified operational role with end-to-end authority for study protocol onboarding, multi-file patient record uploading, and eligibility verdict review and binding determination signoff, scoped to authorized `StudyID`s via custom token claims.
+* **RBAC - ComplianceAuditor:** Read-only access to immutable CloudTrail audit logs, review determinations, and regulatory compliance dashboards.
 
 ### 3.2 Service Least-Privilege IAM Policies
 All compute resources (Lambda, Step Functions, Bedrock Agents) operate under dedicated execution roles with zero wildcard permissions on data actions.

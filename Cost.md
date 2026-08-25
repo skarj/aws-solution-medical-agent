@@ -82,7 +82,7 @@ All quantitative pricing calculations derive strictly from the operational metri
 
 ### 3.6 Security, Governance & Auditing (`[REQ-SEC-01, REQ-SEC-04, REQ-SEC-05]`)
 * **AWS KMS:** 1 Customer-Managed Key ($1.00) + ~60,000 cryptographic operations ($0.18) = $1.18 / month.
-* **Amazon Cognito:** User directory with under 50 clinical staff MAUs (Free Tier covers up to 50,000 MAUs) = $0.00 / month.
+* **Amazon Cognito:** User directory with under 50 Clinical Investigator MAUs (Free Tier covers up to 50,000 MAUs) = $0.00 / month.
 * **AWS CloudTrail & CloudWatch Logs:** S3 Data Events + 10 GB/month log ingestion + 7-year log retention = $10.00 – $30.00 / month.
 * **Estimated Monthly Subtotal:** **$11.00 – $30.00 / month**.
 
