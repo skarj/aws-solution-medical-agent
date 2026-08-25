@@ -19,14 +19,14 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 * **Requirement Protection**: Never edit, rewrite, or set an existing `[Approved]` requirement to `[Deprecated]` without direct, explicit human instruction.
 
 ### 2. Single-Directional Workflow
-* All system changes must originate in `requirements.md`. 
+* All system changes must originate in `Requirements.md`. 
 * When scope shifts, propagate updates strictly downstream in this sequence: 
   `Requirements.md` → `Architecture.md` / `Security.md` → `Cost.md` → `Services.md` → `Log.md`
 
 ### 3. State-Gated Execution
 * Maintain explicit states for all entries in `Requirements.md`: `[Draft]`, `[Approved]`, or `[Deprecated]`.
 * Human inputs and initial agent-suggested requirements default to `[Draft]`.
-* **Only generate or modify downstream architectural components, security rules, or cost models for requirements marked `[Approved]`.**
+* Only generate or modify downstream architectural components, security rules, or cost models for requirements marked `[Approved]`.
 
 ### 4. Traceability & Tagging
 * Assign unique tags to all requirements: `[REQ-F-XX]` (Functional), `[REQ-NF-XX]` (Non-Functional), `[REQ-SEC-XX]` (Security), `[REQ-COST-XX]` (Budgetary).
@@ -41,7 +41,7 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 * Move superseded architectural components, pricing models, or requirements to an `## Archive` section at the bottom of the target file.
 
 ### 7. Diagrams & Standards
-* Render all data flows and system topologies in `Architecture.md` using Mermaid.js (`graph TD` or `sequenceDiagram`).
+* Render all data flows and system topologies in `Architecture.md` using Mermaid.js (`graph TD`).
 * Annotate Mermaid diagram nodes with their target Requirement IDs.
 * Sanitize Node Labels: Require double quotes around all node labels (e.g., `nodeA["API Gateway (REST)"]`) to prevent parentheses, brackets, or slashes from breaking the parser.
 - Use Subgraphs for Boundaries: Instruct the agent to use `subgraph` blocks to visually segregate AWS Accounts, Regions, VPCs, Public/Private Subnets, and third-party integrations.

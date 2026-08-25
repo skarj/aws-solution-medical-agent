@@ -1,5 +1,3 @@
-# Services.md
-
 ## AWS Services Catalog & Documentation Directory
 
 The AI-Assisted Clinical Trial Screening Platform relies on the following official AWS services. Each service entry includes its functional role within the solution, governing requirement IDs, and verified official AWS documentation links.

@@ -1,5 +1,3 @@
-# Security.md
-
 ## 1. Security & Governance Overview
 
 The AI-Assisted Clinical Trial Screening Platform processes Protected Health Information (PHI) and clinical trial protocol intellectual property. The security posture adheres strictly to the **HIPAA Security and Privacy Rules**, the **AWS Well-Architected Framework (Security Pillar)**, and the signed **AWS Business Associate Addendum (BAA)**.
@@ -14,6 +12,7 @@ The AI-Assisted Clinical Trial Screening Platform processes Protected Health Inf
 * **Amazon DynamoDB:** Tables (`study-protocols`, `patient-verdicts`) are created with customer-managed KMS CMK encryption at rest.
 * **Vector Store:** Vector embeddings, chunk indices, and metadata are encrypted using the same KMS CMK.
 
+#### S3 KMS Enforcement Bucket Policy:
 ```json
 {
   "Version": "2012-10-17",
@@ -37,8 +36,9 @@ The AI-Assisted Clinical Trial Screening Platform processes Protected Health Inf
 
 ### 2.2 Encryption in Transit (`[REQ-SEC-02]`)
 * **Transport Layer Security (TLS 1.3):** All external and internal communications require TLS 1.3 (with fallback to TLS 1.2 minimum).
-* **S3 Secure Transport Enforcement:** S3 Bucket Policies enforce HTTPS across all endpoints via `aws:SecureTransport` condition checks:
+* **S3 Secure Transport Enforcement:** S3 Bucket Policies enforce HTTPS across all endpoints via `aws:SecureTransport` condition checks.
 
+#### S3 TLS Enforcement Policy:
 ```json
 {
   "Sid": "EnforceTLSRequestsOnly",
@@ -63,10 +63,9 @@ The AI-Assisted Clinical Trial Screening Platform processes Protected Health Inf
 
 ### 3.1 User Authentication & Authorization
 * **Amazon Cognito User Pool:** Clinical staff and trial coordinators authenticate via Amazon Cognito with mandatory Multi-Factor Authentication (MFA - SMS/TOTP).
-* **Role-Based Access Control (RBAC):**
-  * `StudyCoordinator`: Authorized to upload protocols, initiate new studies, and view protocol parsing statuses.
-  * `ClinicalReviewer`: Authorized to view patient screening results, access presigned URLs for patient PDFs, and submit binding determinations (`Approve`/`Reject`/`Override`).
-  * `SecurityAuditor`: Read-only access to CloudTrail audit logs and compliance dashboards.
+* **RBAC - StudyCoordinator:** Authorized to upload protocols, initiate new studies, and view protocol parsing statuses.
+* **RBAC - ClinicalReviewer:** Authorized to view patient screening results, access presigned URLs for patient PDFs, and submit binding determinations (`Approve`, `Reject`, `Override`).
+* **RBAC - SecurityAuditor:** Read-only access to CloudTrail audit logs and compliance dashboards.
 
 ### 3.2 Service Least-Privilege IAM Policies
 All compute resources (Lambda, Step Functions, Bedrock Agents) operate under dedicated execution roles with zero wildcard permissions on data actions.
@@ -125,10 +124,9 @@ All compute resources (Lambda, Step Functions, Bedrock Agents) operate under ded
 ## 4. Network Isolation & Perimeter Defense (`[REQ-SEC-02]`)
 
 * **Amazon VPC Architecture:** Backend Lambda execution environments are placed within private subnets having no direct Internet Gateway (IGW) or NAT routes.
-* **AWS PrivateLink / VPC Endpoints:**
-  * `S3 Gateway Endpoint`: Secure, direct access to S3 buckets within the AWS network without internet traversal.
-  * `DynamoDB Gateway Endpoint`: Private routing for DynamoDB queries.
-  * `Interface VPC Endpoints (PrivateLink)`: Configured for Amazon Bedrock, Amazon Textract, AWS KMS, and AWS Step Functions.
+* **S3 Gateway Endpoint:** Secure, direct access to S3 buckets within the AWS network without internet traversal.
+* **DynamoDB Gateway Endpoint:** Private routing for DynamoDB queries.
+* **Interface VPC Endpoints (PrivateLink):** Configured for Amazon Bedrock, Amazon Textract, AWS KMS, and AWS Step Functions.
 * **Presigned URLs for PDF Viewing:** Patient medical records are never exposed via public URLs. The review API generates short-lived S3 Presigned GET URLs with a maximum 15-minute Time-To-Live (TTL), scoped strictly to the authenticated clinical reviewer session.
 
 ---

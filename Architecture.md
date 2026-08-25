@@ -1,83 +1,33 @@
-# Architecture.md
-
 ## 1. High-Level System Architecture
 
 The AI-Assisted Clinical Trial Screening Platform employs an asynchronous, event-driven, serverless architecture on AWS. The design eliminates 24/7 idle infrastructure costs while providing strict multi-tenant data isolation and HIPAA compliance.
 
 ```mermaid
-graph TD
-    subgraph Client_Tier ["Client & Clinical Review Tier"]
-        CR["Clinical Reviewer"]
-        UI["Web UI: React / Next.js [REQ-F-16]"]
-        COG["Amazon Cognito User Pool [REQ-SEC-04]"]
+graph LR
+    subgraph Client_Tier ["User and Client Interface (REQ-F-16)"]
+        WEB["Clinical Web Dashboard"]
     end
 
-    subgraph API_Edge ["API & Edge Security Tier"]
-        APIGW["Amazon API Gateway (REST API) [REQ-SEC-02]"]
-        AUTH_LAMBDA["Lambda Authorizer [REQ-SEC-04]"]
+    subgraph Ingestion_Tier ["Storage and Async Ingestion (REQ-F-01, REQ-F-05)"]
+        S3["Amazon S3 Buckets"]
+        OCR["Amazon Textract OCR"]
     end
 
-    subgraph Storage_Tier ["S3 Storage Tier (Encrypted with KMS CMK) [REQ-SEC-01]"]
-        S3_PROTO["S3: protocol-data-upload [REQ-F-01]"]
-        S3_PATIENT["S3: patient-data-upload [REQ-F-05]"]
-        S3_EXTRACT["S3: patient-extracted-data [REQ-F-08]"]
+    subgraph AI_Engine_Tier ["RAG and AI Reasoning Engine (REQ-F-09, REQ-F-12)"]
+        KB["Bedrock Knowledge Base and Vectors"]
+        AGENT["Bedrock Reasoning Agent"]
     end
 
-    subgraph Async_Ingestion ["Asynchronous Ingestion & OCR Tier"]
-        SFN["AWS Step Functions (Patient Workflow) [REQ-F-06, REQ-NF-03]"]
-        TEXTRACT["Amazon Textract (StartDocumentAnalysis) [REQ-F-02, REQ-F-07]"]
-        SNS_TOPIC["Amazon SNS (Textract Completion) [REQ-F-07]"]
-        SQS_DLQ["Amazon SQS (Dead Letter Queue) [REQ-NF-03]"]
+    subgraph Persistence_Tier ["Structured Persistence and Audit (REQ-F-04, REQ-F-15)"]
+        DDB["Amazon DynamoDB Tables"]
     end
 
-    subgraph AI_RAG_Tier ["Bedrock AI & Vector Search Tier"]
-        LAMBDA_EXTRACT["AWS Lambda (Rule Extraction) [REQ-F-03]"]
-        KB_INGEST["Bedrock Knowledge Bases Ingestion [REQ-F-09]"]
-        TITAN_EMB["Amazon Titan Text Embeddings [REQ-F-09]"]
-        VEC_STORE["Serverless Vector Store [REQ-F-10, REQ-F-11]"]
-        BEDROCK_AGENT["Amazon Bedrock Single Agent [REQ-F-12, REQ-F-14]"]
-    end
-
-    subgraph Persistence_Tier ["Persistence & Audit Tier"]
-        DDB_PROTO["DynamoDB: study-protocols [REQ-F-04]"]
-        DDB_VERDICT["DynamoDB: patient-verdicts [REQ-F-15, REQ-F-18]"]
-        KMS["AWS KMS Customer-Managed Key [REQ-SEC-01]"]
-        CW_TRAIL["CloudWatch & CloudTrail [REQ-SEC-05]"]
-    end
-
-    %% Client Interactions
-    CR -->|"1. Authenticates (MFA/RBAC)"| COG
-    CR -->|"2. Interacts with UI"| UI
-    UI -->|"3. HTTPS / TLS 1.3"| APIGW
-    APIGW -.->|"Validates JWT"| AUTH_LAMBDA
-
-    %% Protocol Flow
-    UI -->|"Upload Protocol PDF"| S3_PROTO
-    S3_PROTO -->|"S3 ObjectCreated Event"| LAMBDA_EXTRACT
-    LAMBDA_EXTRACT -->|"Invoke Async OCR"| TEXTRACT
-    LAMBDA_EXTRACT -->|"Extract Rules via Bedrock LLM"| BEDROCK_AGENT
-    LAMBDA_EXTRACT -->|"Store Structured Rules"| DDB_PROTO
-
-    %% Patient Flow
-    UI -->|"Upload Multi-file Records"| S3_PATIENT
-    S3_PATIENT -->|"Trigger State Machine"| SFN
-    SFN -->|"Map State: Async OCR Jobs"| TEXTRACT
-    TEXTRACT -->|"Emit Job Notification"| SNS_TOPIC
-    SNS_TOPIC -->|"Resume Task Token"| SFN
-    SFN -->|"Save Extracted Text"| S3_EXTRACT
-    SFN -->|"Start Ingestion Job"| KB_INGEST
-    KB_INGEST -->|"Generate Embeddings"| TITAN_EMB
-    TITAN_EMB -->|"Persist Vector Chunks"| VEC_STORE
-    SFN -->|"Trigger Agent Evaluation"| BEDROCK_AGENT
-    BEDROCK_AGENT -->|"Read Protocol Rules"| DDB_PROTO
-    BEDROCK_AGENT -->|"Filtered Vector Query (patient_id)"| VEC_STORE
-    BEDROCK_AGENT -->|"Persist Structured Verdict"| DDB_VERDICT
-    SFN -.->|"On Failure Retry Exhaustion"| SQS_DLQ
-
-    %% Reviewer Flow
-    APIGW -->|"Generate Presigned S3 GET URL"| S3_PATIENT
-    APIGW -->|"Query Verdict & Protocols"| DDB_VERDICT
-    UI -->|"Submit Clinician Determination"| DDB_VERDICT
+    WEB -->|"Uploads Records and Protocols"| S3
+    S3 -->|"Extracts Text and Tables"| OCR
+    OCR -->|"Indexes Documents"| KB
+    KB -->|"Retrieves Context"| AGENT
+    AGENT -->|"Saves Rules and Verdicts"| DDB
+    DDB -->|"Displays AI Checklist"| WEB
 ```
 
 ---
@@ -87,31 +37,37 @@ graph TD
 This workflow parses a clinical study protocol PDF (30–100 pages) during trial initialization and extracts itemized inclusion and exclusion criteria into structured DynamoDB records.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor Coordinator as "Study Coordinator"
-    participant S3_Proto as "S3: protocol-data-upload [REQ-F-01]"
-    participant Lambda_Ocr as "Lambda: Protocol Parser [REQ-F-02, REQ-F-03]"
-    participant Textract as "Amazon Textract [REQ-F-02]"
-    participant Bedrock_LLM as "Amazon Bedrock (Nova / Claude) [REQ-F-03]"
-    participant DDB_Proto as "DynamoDB: study-protocols [REQ-F-04]"
+graph TD
+    subgraph Coordinator_Tier ["Study Coordinator Action (REQ-F-01)"]
+        USER["Study Coordinator"]
+        S3_PROTO["S3: protocol-data-upload (REQ-F-01)"]
+    end
 
-    Coordinator->>S3_Proto: Upload protocol.pdf (Encrypted with KMS CMK)
-    S3_Proto->>Lambda_Ocr: S3 ObjectCreated Event Notification
-    Lambda_Ocr->>Textract: StartDocumentAnalysis(Tables, Forms, Text)
-    Note over Lambda_Ocr,Textract: Asynchronous extraction for scanned/digital PDFs
-    Textract-->>Lambda_Ocr: Return Document Hierarchy & Full Text
-    Lambda_Ocr->>Bedrock_LLM: InvokeModel with System Extraction Prompt & JSON Schema
-    Note over Bedrock_LLM: Extracts itemized inclusion/exclusion arrays with unique IDs
-    Bedrock_LLM-->>Lambda_Ocr: Structured JSON Protocol Rules
-    Lambda_Ocr->>DDB_Proto: PutItem (StudyID, Study_Name, Inclusion, Exclusion)
+    subgraph Extraction_Pipeline ["Asynchronous Extraction and Parsing (REQ-F-02, REQ-F-03)"]
+        LAMBDA_START["AWS Lambda: Protocol Trigger (REQ-F-02)"]
+        TEXTRACT["Amazon Textract StartDocumentAnalysis (REQ-F-02)"]
+        LAMBDA_STRUCT["AWS Lambda: Rule Structurer (REQ-F-03)"]
+        BEDROCK_LLM["Amazon Bedrock Nova / Claude Sonnet (REQ-F-03)"]
+    end
+
+    subgraph Storage_Tier ["Protocol Persistence (REQ-F-04)"]
+        DDB_PROTO["DynamoDB: study-protocols Table (REQ-F-04)"]
+    end
+
+    USER -->|"Uploads protocol.pdf"| S3_PROTO
+    S3_PROTO -->|"S3 ObjectCreated Event"| LAMBDA_START
+    LAMBDA_START -->|"Calls StartDocumentAnalysis"| TEXTRACT
+    TEXTRACT -->|"Returns OCR Tables and Text"| LAMBDA_STRUCT
+    LAMBDA_STRUCT -->|"Prompts with JSON Schema"| BEDROCK_LLM
+    BEDROCK_LLM -->|"Returns Structured JSON Rules"| LAMBDA_STRUCT
+    LAMBDA_STRUCT -->|"PutItem StudyID, Rules"| DDB_PROTO
 ```
 
 ### Detailed Pipeline Stages:
 1. **Document Ingestion (`[REQ-F-01]`):** The study coordinator uploads `protocol.pdf` to `s3://protocol-data-upload/{StudyID}/`.
 2. **Text & Table OCR (`[REQ-F-02]`):** S3 Event Notification triggers the Protocol Ingestion Lambda function. For documents exceeding 5 pages or containing scanned text, Lambda calls Textract `StartDocumentAnalysis` with feature types `TABLES` and `FORMS`.
 3. **Structured Rule Extraction (`[REQ-F-03]`):** Extracted markdown text is provided to Bedrock foundation model (Amazon Nova Pro / Anthropic Claude Sonnet 3.5) with a constrained system prompt enforcing the `study-protocols` JSON schema.
-4. **Persistence (`[REQ-F-04]`):** Structured rules are written to the `study-protocols` DynamoDB table under primary key `Study_ID`.
+4. **Persistence (`[REQ-F-04]`):** Structured rules are written to the `study-protocols` DynamoDB table under primary key `StudyID`.
 
 ---
 
@@ -121,43 +77,47 @@ This workflow processes multi-file patient records (up to 150 MB total, digital 
 
 ```mermaid
 graph TD
-    subgraph Step_Functions_Execution ["AWS Step Functions State Machine [REQ-F-06, REQ-NF-01]"]
-        START["Execution Start: {PatientID, StudyID}"]
-        MAP_OCR["Map State (Concurrency: 10) [REQ-F-07]"]
-        WAIT_OCR["Task Token / Wait State [REQ-F-07]"]
-        STORE_RAW["Save Parsed Text to S3 [REQ-F-08]"]
-        START_KB["Bedrock KB StartIngestionJob [REQ-F-09]"]
-        WAIT_KB["Poll / Wait for KB Ingestion Complete"]
-        INVOKE_AGENT["Invoke Single Bedrock Agent [REQ-F-12]"]
-        SAVE_VERDICT["PutItem to patient-verdicts Table [REQ-F-15]"]
-        DLQ_HANDLER["SQS DLQ Error Handler [REQ-NF-03]"]
+    subgraph Ingestion_Trigger ["Multi-File Ingestion (REQ-F-05, REQ-F-06)"]
+        CLINICIAN["Clinical Staff"]
+        S3_PATIENT["S3: patient-data-upload/{PatientID}/ (REQ-F-05)"]
+        EV_BRIDGE["Amazon EventBridge (REQ-F-06)"]
     end
 
-    subgraph Services ["Underlying AWS Services"]
-        TXT["Amazon Textract (Async StartDocumentAnalysis) [REQ-F-07]"]
-        S3_OUT["S3: patient-extracted-data [REQ-F-08]"]
-        VEC["Vector Store (Bedrock KB / Serverless) [REQ-F-10, REQ-F-11]"]
-        DDB_P["DynamoDB: study-protocols [REQ-F-04]"]
-        DDB_V["DynamoDB: patient-verdicts [REQ-F-15]"]
+    subgraph State_Machine ["AWS Step Functions Orchestration (REQ-F-06, REQ-NF-01)"]
+        SFN_START["Execution Start: PatientID, StudyID"]
+        MAP_OCR["Map State: Parallel OCR (REQ-F-07)"]
+        S3_EXTRACT["S3: patient-extracted-data (REQ-F-08)"]
+        KB_INGEST["Bedrock KB StartIngestionJob (REQ-F-09)"]
+        INVOKE_AGENT["Invoke Single Bedrock Agent (REQ-F-12)"]
+        SQS_DLQ["Amazon SQS Dead Letter Queue (REQ-NF-03)"]
     end
 
-    START --> MAP_OCR
-    MAP_OCR -->|"Start OCR Job per PDF"| TXT
-    TXT -.->|"Completion Callback"| WAIT_OCR
-    WAIT_OCR --> STORE_RAW
-    STORE_RAW -->|"Write Text"| S3_OUT
-    STORE_RAW --> START_KB
-    START_KB -->|"Chunk, Embed & Index"| VEC
-    START_KB --> WAIT_KB
-    WAIT_KB --> INVOKE_AGENT
-    INVOKE_AGENT -->|"Read Protocol Rules"| DDB_P
-    INVOKE_AGENT -->|"Retrieve Evidence Chunks"| VEC
-    INVOKE_AGENT --> SAVE_VERDICT
-    SAVE_VERDICT -->|"Write Record"| DDB_V
+    subgraph AI_RAG_Services ["AI and Vector Engine (REQ-F-10, REQ-F-13, REQ-F-14)"]
+        TEXTRACT_ASYNC["Amazon Textract Async Jobs (REQ-F-07)"]
+        TITAN_EMB["Titan Embeddings v2 and Vector Store (REQ-F-10, REQ-F-11)"]
+        DDB_PROTO["DynamoDB: study-protocols (REQ-F-04)"]
+        BEDROCK_AGENT["Amazon Bedrock Reasoning Agent (REQ-F-12, REQ-F-14)"]
+    end
 
-    %% Error Transitions
-    MAP_OCR -.->|"On 3x Retry Failure"| DLQ_HANDLER
-    INVOKE_AGENT -.->|"On Error"| DLQ_HANDLER
+    subgraph Persistence ["Verdict Storage (REQ-F-15)"]
+        DDB_VERDICT["DynamoDB: patient-verdicts Table (REQ-F-15)"]
+    end
+
+    CLINICIAN -->|"Uploads Multi-PDF Records"| S3_PATIENT
+    S3_PATIENT -->|"ObjectCreated Event"| EV_BRIDGE
+    EV_BRIDGE -->|"Triggers Execution"| SFN_START
+    SFN_START --> MAP_OCR
+    MAP_OCR -->|"Parallel StartDocumentAnalysis"| TEXTRACT_ASYNC
+    TEXTRACT_ASYNC -->|"Extracted Text"| S3_EXTRACT
+    S3_EXTRACT --> KB_INGEST
+    KB_INGEST -->|"Chunking and Embeddings"| TITAN_EMB
+    KB_INGEST --> INVOKE_AGENT
+    INVOKE_AGENT -->|"Pull Protocol Rules"| DDB_PROTO
+    INVOKE_AGENT -->|"RAG Query patient_id"| TITAN_EMB
+    INVOKE_AGENT -->|"Execute Single-Agent Evaluation"| BEDROCK_AGENT
+    BEDROCK_AGENT -->|"Structured Verdict JSON"| DDB_VERDICT
+    MAP_OCR -.->|"On Failure Retries Exceeded"| SQS_DLQ
+    INVOKE_AGENT -.->|"On Unhandled Error"| SQS_DLQ
 ```
 
 ### Execution Steps & State Specifications:
@@ -165,41 +125,46 @@ graph TD
 2. **Parallel Asynchronous OCR (`[REQ-F-07]`):** Step Functions executes a dynamic `Map` state over all uploaded files. Each iteration executes `StartDocumentAnalysis` with an SQS/SNS completion callback.
 3. **Raw Text Storage & Ingestion (`[REQ-F-08, REQ-F-09]`):** Extracted text is saved in `s3://patient-extracted-data/{PatientID}/`. Step Functions triggers `StartIngestionJob` on Amazon Bedrock Knowledge Bases.
 4. **Vector Embedding & Chunk Metadata (`[REQ-F-10, REQ-F-11]`):** Bedrock Knowledge Bases automatically chunks the text (512 tokens with 20% overlap), generates embeddings using `amazon.titan-embed-text-v2`, and indexes chunks with metadata (`patient_id`, `source_filename`, `page_number`).
-5. **Deterministic Single-Agent Reasoning (`[REQ-F-12, REQ-F-13, REQ-F-14]`):**
-   * A single Bedrock Agent receives `{PatientID, StudyID}`.
-   * Fetches active criteria from DynamoDB `study-protocols`.
-   * For each criterion, executes vector retrieval against Bedrock Knowledge Base filtered by `metadata.patient_id == {PatientID}` (`[REQ-NF-02]`).
-   * Evaluates evidence and populates JSON schema verdict (`MET`, `NOT_MET`, `UNCERTAIN`) with exact quotes and page numbers.
+5. **Deterministic Single-Agent Reasoning (`[REQ-F-12, REQ-F-13, REQ-F-14]`):** A single Bedrock Agent receives `{PatientID, StudyID}`, fetches active criteria from DynamoDB `study-protocols`, queries Bedrock Knowledge Base filtered by `metadata.patient_id == {PatientID}` (`[REQ-NF-02]`), and populates the structured JSON verdict (`MET`, `NOT_MET`, `UNCERTAIN`) with citations and exact quotes.
 6. **Persistence & Auditing (`[REQ-F-15]`):** Output verdict written to `patient-verdicts` with default status `PENDING`.
 
 ---
 
 ## 4. Workflow 3: Human-in-the-Loop Clinical Review Interface
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Clinician as "Licensed Clinical Reviewer [REQ-F-16]"
-    participant WebUI as "React / Next.js Web UI [REQ-F-16]"
-    participant APIGW as "Amazon API Gateway [REQ-SEC-02]"
-    participant Lambda as "AWS Lambda (Review API)"
-    participant DDB as "DynamoDB: patient-verdicts [REQ-F-15, REQ-F-18]"
-    participant S3 as "S3: patient-data-upload [REQ-F-05, REQ-SEC-01]"
+This workflow describes the clinical reviewer workflow for reviewing AI-suggested eligibility verdicts alongside original patient documentation.
 
-    Clinician->>WebUI: Open Patient Screening Dashboard
-    WebUI->>APIGW: GET /verdicts/{PatientID}?studyId={StudyID} (Bearer JWT)
-    APIGW->>Lambda: Route to Review Handler
-    Lambda->>DDB: GetItem(Patient_ID, Study_ID)
-    Lambda->>S3: GeneratePresignedUrl(patient-data-upload/{PatientID}/*.pdf, Expires=900s)
-    Lambda-->>WebUI: Return Verdict JSON + Presigned S3 PDF URLs
-    Note over WebUI,Clinician: UI renders side-by-side: PDF viewer on left, Criteria on right [REQ-F-16]
-    Clinician->>WebUI: Click Criterion Evidence Quote [REQ-F-17]
-    Note over WebUI: PDF Viewer automatically scrolls to page_citation and highlights evidence quote
-    Clinician->>WebUI: Select Decision ("Approve" / "Reject" / "Override") + Notes [REQ-F-18]
-    WebUI->>APIGW: POST /verdicts/{PatientID}/signoff (reviewer_signoff payload)
-    APIGW->>Lambda: Process Clinical Determination
-    Lambda->>DDB: UpdateItem (reviewer_signoff, status='APPROVED', timestamp=ISO8601)
-    Lambda-->>WebUI: 200 OK (Audit Log Committed)
+```mermaid
+graph TD
+    subgraph Client_App ["Clinical Reviewer Dashboard (REQ-F-16)"]
+        DOCTOR["Licensed Clinical Reviewer"]
+        UI_VIEW["React / Next.js Web UI (REQ-F-16)"]
+    end
+
+    subgraph API_Edge ["API and Security Gateway (REQ-SEC-02, REQ-SEC-04)"]
+        COGNITO["Amazon Cognito MFA / RBAC (REQ-SEC-04)"]
+        APIGW["Amazon API Gateway REST (REQ-SEC-02)"]
+        LAMBDA_REV["AWS Lambda: Review API Handler"]
+    end
+
+    subgraph Data_Sources ["Protected Storage and Verdict Data (REQ-SEC-01)"]
+        DDB_VERDICT["DynamoDB: patient-verdicts (REQ-F-15, REQ-F-18)"]
+        S3_PATIENT["S3: patient-data-upload Encrypted (REQ-F-05)"]
+    end
+
+    DOCTOR -->|"Authenticates via MFA and RBAC"| COGNITO
+    COGNITO -->|"Issues Bearer JWT"| UI_VIEW
+    UI_VIEW -->|"GET /verdicts/PatientID"| APIGW
+    APIGW -->|"Invokes with Claims"| LAMBDA_REV
+    LAMBDA_REV -->|"Reads Verdict and Rules"| DDB_VERDICT
+    LAMBDA_REV -->|"Generates 15-min Presigned URL"| S3_PATIENT
+    LAMBDA_REV -->|"Returns Payload and PDF URLs"| UI_VIEW
+    UI_VIEW -->|"Renders Side-by-Side Dual Pane"| DOCTOR
+    DOCTOR -->|"Clicks Citation to Scroll to PDF Page"| UI_VIEW
+    DOCTOR -->|"Submits Determination Approve / Reject / Override"| UI_VIEW
+    UI_VIEW -->|"POST /verdicts/PatientID/signoff"| APIGW
+    APIGW --> LAMBDA_REV
+    LAMBDA_REV -->|"Saves Signoff and Immutable Audit Trail"| DDB_VERDICT
 ```
 
 ---
@@ -208,17 +173,17 @@ sequenceDiagram
 
 ```mermaid
 graph TD
-    subgraph Internet ["Public Network (TLS 1.3 Required) [REQ-SEC-02]"]
+    subgraph Internet ["Public Network - TLS 1.3 Required (REQ-SEC-02)"]
         CLIENT["Clinician Browser / HTTPS Client"]
     end
 
-    subgraph AWS_Cloud ["AWS Cloud Environment (BAA Signed) [REQ-SEC-03]"]
-        subgraph VPC ["Customer Amazon VPC (Isolated Subnets)"]
-            subgraph Private_App_Subnets ["Private Application Subnets (No IGW Route)"]
+    subgraph AWS_Cloud ["AWS Cloud Environment - BAA Signed (REQ-SEC-03)"]
+        subgraph VPC ["Customer Amazon VPC - Isolated Subnets"]
+            subgraph Private_App_Subnets ["Private Application Subnets - No IGW Route"]
                 LAMBDA_SVCS["AWS Lambda Microservices"]
             end
 
-            subgraph VPC_Endpoints ["VPC Interface Endpoints (AWS PrivateLink) [REQ-SEC-02]"]
+            subgraph VPC_Endpoints ["VPC Interface Endpoints AWS PrivateLink (REQ-SEC-02)"]
                 VPCE_S3["S3 Gateway Endpoint"]
                 VPCE_DDB["DynamoDB Gateway Endpoint"]
                 VPCE_BEDROCK["Bedrock VPC Interface Endpoint"]
@@ -227,12 +192,12 @@ graph TD
             end
         end
 
-        subgraph AWS_Managed_PaaS ["AWS Managed Serverless Services (KMS Encrypted) [REQ-SEC-01]"]
-            BEDROCK_SVC["Amazon Bedrock (Agent + KB)"]
+        subgraph AWS_Managed_PaaS ["AWS Managed Serverless Services - KMS Encrypted (REQ-SEC-01)"]
+            BEDROCK_SVC["Amazon Bedrock Agent and KB"]
             TEXTRACT_SVC["Amazon Textract"]
             DDB_SVC["Amazon DynamoDB"]
             S3_SVC["Amazon S3 Buckets"]
-            KMS_SVC["AWS KMS (Customer Managed Key)"]
+            KMS_SVC["AWS KMS Customer Managed Key"]
         end
     end
 

@@ -1,5 +1,3 @@
-# Requirements.md
-
 ## 1. Executive Summary & Objective
 The AI-Assisted Clinical Trial Screening Platform automates patient eligibility assessment by analyzing unstructured medical records and matching them against trial inclusion and exclusion criteria. 
 The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI automates data extraction, protocol matching, and citation mapping, while licensed clinical personnel retain full authority over final trial enrollment decisions.
