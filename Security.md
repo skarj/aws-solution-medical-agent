@@ -70,6 +70,52 @@ The AI-Assisted Clinical Trial Screening Platform processes Protected Health Inf
 ### 3.2 Service Least-Privilege IAM Policies
 All compute resources (Lambda, Step Functions, Bedrock Agents) operate under dedicated execution roles with zero wildcard permissions on data actions.
 
+#### Step Functions State Machine Execution Role Policy (Excerpt):
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowTextractAsyncJobs",
+      "Effect": "Allow",
+      "Action": [
+        "textract:StartDocumentAnalysis",
+        "textract:GetDocumentAnalysis"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowLambdaTaskInvocations",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:InvokeFunction"
+      ],
+      "Resource": [
+        "arn:aws:lambda:*:*:function:protocol-rule-structurer",
+        "arn:aws:lambda:*:*:function:patient-screening-handler"
+      ]
+    },
+    {
+      "Sid": "AllowBedrockKBIngestion",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:StartIngestionJob",
+        "bedrock:GetIngestionJob"
+      ],
+      "Resource": "arn:aws:bedrock:*:*:knowledge-base/*"
+    },
+    {
+      "Sid": "AllowSqsDlqMessages",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:SendMessage"
+      ],
+      "Resource": "arn:aws:sqs:*:*:*-dlq"
+    }
+  ]
+}
+```
+
 #### Bedrock Agent Execution Role Policy (Excerpt):
 ```json
 {

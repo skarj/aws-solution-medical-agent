@@ -8,7 +8,7 @@ The AI-Assisted Clinical Trial Screening Platform relies on the following offici
 
 | AWS Service | Architecture Role | Governing Requirements | Official Documentation |
 | :--- | :--- | :--- | :--- |
-| **AWS Step Functions** | Serverless state machine orchestrating parallel multi-file OCR, text indexing, and AI agent execution. | `[REQ-F-06]`, `[REQ-F-07]`, `[REQ-NF-01]`, `[REQ-NF-03]` | [AWS Step Functions Documentation](https://docs.aws.amazon.com/step-functions/) |
+| **AWS Step Functions** | Serverless state machines orchestrating protocol onboarding OCR/rule parsing and patient multi-file screening pipelines. | `[REQ-F-02]`, `[REQ-F-03]`, `[REQ-F-06]`, `[REQ-F-07]`, `[REQ-NF-01]`, `[REQ-NF-03]` | [AWS Step Functions Documentation](https://docs.aws.amazon.com/step-functions/) |
 | **AWS Lambda** | Event-driven microservices for S3 event routing, rule parsing, API handlers, and Bedrock Agent actions. | `[REQ-F-03]`, `[REQ-F-12]`, `[REQ-SEC-04]` | [AWS Lambda Documentation](https://docs.aws.amazon.com/lambda/) |
 | **Amazon API Gateway** | Managed REST API edge providing authenticated clinician access and presigned URL generation. | `[REQ-F-16]`, `[REQ-SEC-02]`, `[REQ-SEC-04]` | [Amazon API Gateway Documentation](https://docs.aws.amazon.com/apigateway/) |
 | **Amazon EventBridge** | Serverless event bus routing S3 document upload events to Step Functions executions. | `[REQ-F-06]` | [Amazon EventBridge Documentation](https://docs.aws.amazon.com/eventbridge/) |

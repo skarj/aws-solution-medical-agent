@@ -17,8 +17,8 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 
 ### 3.1 Protocol Onboarding & Structuring
 * **[Approved] [REQ-F-01]:** The system shall accept a single study protocol PDF (30–100 pages) via a web portal into an encrypted S3 bucket (`protocol-data-upload`).
-* **[Approved] [REQ-F-02]:** S3 upload events must automatically invoke Amazon Textract (asynchronous) to parse text, forms, and tables from digital or scanned/faxed protocol files.
-* **[Approved] [REQ-F-03]:** An AWS Lambda function must pass parsed protocol text to an LLM on Amazon Bedrock (such as Amazon Nova Pro or Anthropic Claude Sonnet) to extract all inclusion and exclusion rules into an itemized JSON array.
+* **[Approved] [REQ-F-02]:** Protocol PDF upload events must automatically initiate an AWS Step Functions state machine execution to orchestrate asynchronous background processing.
+* **[Approved] [REQ-F-03]:** Step Functions must execute a Lambda task passing the extracted protocol text to an LLM on Amazon Bedrock (such as Amazon Nova Pro or Anthropic Claude Sonnet) to extract all inclusion and exclusion rules into an itemized JSON array.
 * **[Approved] [REQ-F-04]:** Extracted protocol rules must be stored in an Amazon DynamoDB table (`study-protocols`), indexed by `StudyID`.
 
 ### 3.2 Patient Record Ingestion & Asynchronous OCR

@@ -42,7 +42,7 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 
 ### 7. Diagrams & Standards
 * Render all data flows and system topologies in `Architecture.md` using Mermaid.js (`graph TD`).
-* Annotate Mermaid diagram nodes with their target Requirement IDs.
+* Render state machine logic using Mermaid `stateDiagram-v2`. Clearly visually segregate `Choice` branches, `Catch`/`Retry` flows, and error states.
 * Sanitize Node Labels: Require double quotes around all node labels (e.g., `nodeA["API Gateway (REST)"]`) to prevent parentheses, brackets, or slashes from breaking the parser.
 - Use Subgraphs for Boundaries: Instruct the agent to use `subgraph` blocks to visually segregate AWS Accounts, Regions, VPCs, Public/Private Subnets, and third-party integrations.
 - Limit Visual Complexity: Mandate splitting massive end-to-end architectures into smaller, focused sub-diagrams (e.g., high-level overview vs. detailed ingestion pipeline) to prevent rendering clutter.

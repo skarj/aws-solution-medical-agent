@@ -8,12 +8,13 @@ graph LR
         WEB["Clinical Web Dashboard"]
     end
 
-    subgraph Ingestion_Tier ["Storage and Async Ingestion (REQ-F-01, REQ-F-05)"]
+    subgraph Ingestion_Tier ["Storage and Async Ingestion (REQ-F-01, REQ-F-02, REQ-F-05, REQ-F-06)"]
         S3["Amazon S3 Buckets"]
+        SFN["AWS Step Functions State Machines"]
         OCR["Amazon Textract OCR"]
     end
 
-    subgraph AI_Engine_Tier ["RAG and AI Reasoning Engine (REQ-F-09, REQ-F-12)"]
+    subgraph AI_Engine_Tier ["RAG and AI Reasoning Engine (REQ-F-03, REQ-F-09, REQ-F-12)"]
         KB["Bedrock Knowledge Base and Vectors"]
         AGENT["Bedrock Reasoning Agent"]
     end
@@ -23,7 +24,8 @@ graph LR
     end
 
     WEB -->|"Uploads Records and Protocols"| S3
-    S3 -->|"Extracts Text and Tables"| OCR
+    S3 -->|"Triggers State Machines"| SFN
+    SFN -->|"Executes Async OCR"| OCR
     OCR -->|"Indexes Documents"| KB
     KB -->|"Retrieves Context"| AGENT
     AGENT -->|"Saves Rules and Verdicts"| DDB
@@ -34,46 +36,87 @@ graph LR
 
 ## 2. Workflow 1: Protocol Onboarding & Rule Extraction Pipeline
 
-This workflow parses a clinical study protocol PDF (30–100 pages) during trial initialization and extracts itemized inclusion and exclusion criteria into structured DynamoDB records.
+This workflow parses a clinical study protocol PDF (30–100 pages) during trial initialization and extracts itemized inclusion and exclusion criteria into structured DynamoDB records using an AWS Step Functions state machine.
+
+### 2.1 Component Flow Diagram
 
 ```mermaid
 graph TD
     subgraph Coordinator_Tier ["Study Coordinator Action (REQ-F-01)"]
         USER["Study Coordinator"]
         S3_PROTO["S3: protocol-data-upload (REQ-F-01)"]
+        EV_BRIDGE["Amazon EventBridge (REQ-F-02)"]
     end
 
-    subgraph Extraction_Pipeline ["Asynchronous Extraction and Parsing (REQ-F-02, REQ-F-03)"]
-        LAMBDA_START["AWS Lambda: Protocol Trigger (REQ-F-02)"]
+    subgraph Step_Functions_Tier ["AWS Step Functions Orchestration (REQ-F-02, REQ-F-03)"]
+        SFN_PROTO["Step Functions: Protocol Onboarding State Machine (REQ-F-02)"]
+        LAMBDA_STRUCT["AWS Lambda: Rule Extraction Task (REQ-F-03)"]
+        SQS_DLQ["Amazon SQS Dead Letter Queue (REQ-NF-03)"]
+    end
+
+    subgraph External_Services ["AWS Managed AI and Persistence"]
         TEXTRACT["Amazon Textract StartDocumentAnalysis (REQ-F-02)"]
-        LAMBDA_STRUCT["AWS Lambda: Rule Structurer (REQ-F-03)"]
         BEDROCK_LLM["Amazon Bedrock Nova / Claude Sonnet (REQ-F-03)"]
-    end
-
-    subgraph Storage_Tier ["Protocol Persistence (REQ-F-04)"]
         DDB_PROTO["DynamoDB: study-protocols Table (REQ-F-04)"]
     end
 
     USER -->|"Uploads protocol.pdf"| S3_PROTO
-    S3_PROTO -->|"S3 ObjectCreated Event"| LAMBDA_START
-    LAMBDA_START -->|"Calls StartDocumentAnalysis"| TEXTRACT
-    TEXTRACT -->|"Returns OCR Tables and Text"| LAMBDA_STRUCT
+    S3_PROTO -->|"S3 ObjectCreated Event"| EV_BRIDGE
+    EV_BRIDGE -->|"Triggers Execution StudyID"| SFN_PROTO
+    SFN_PROTO -->|"StartDocumentAnalysis"| TEXTRACT
+    TEXTRACT -->|"Returns Tables and Text"| SFN_PROTO
+    SFN_PROTO -->|"Invokes Task with Extracted Text"| LAMBDA_STRUCT
     LAMBDA_STRUCT -->|"Prompts with JSON Schema"| BEDROCK_LLM
-    BEDROCK_LLM -->|"Returns Structured JSON Rules"| LAMBDA_STRUCT
+    BEDROCK_LLM -->|"Returns Structured Rules JSON"| LAMBDA_STRUCT
     LAMBDA_STRUCT -->|"PutItem StudyID, Rules"| DDB_PROTO
+    SFN_PROTO -.->|"On Task Failure / Retry Exceeded"| SQS_DLQ
 ```
 
-### Detailed Pipeline Stages:
-1. **Document Ingestion (`[REQ-F-01]`):** The study coordinator uploads `protocol.pdf` to `s3://protocol-data-upload/{StudyID}/`.
-2. **Text & Table OCR (`[REQ-F-02]`):** S3 Event Notification triggers the Protocol Ingestion Lambda function. For documents exceeding 5 pages or containing scanned text, Lambda calls Textract `StartDocumentAnalysis` with feature types `TABLES` and `FORMS`.
-3. **Structured Rule Extraction (`[REQ-F-03]`):** Extracted markdown text is provided to Bedrock foundation model (Amazon Nova Pro / Anthropic Claude Sonnet 3.5) with a constrained system prompt enforcing the `study-protocols` JSON schema.
-4. **Persistence (`[REQ-F-04]`):** Structured rules are written to the `study-protocols` DynamoDB table under primary key `StudyID`.
+### 2.2 Protocol Onboarding State Machine (`stateDiagram-v2`)
+
+```mermaid
+stateDiagram-v2
+    [*] --> StartProtocolExecution: S3 Event Trigger (StudyID)
+    
+    state "Start Textract Async OCR Task (REQ-F-02)" as StartProtocolOcr
+    state "Wait for Textract Completion Callback" as WaitForProtocolOcr
+    state "Check OCR Status" as CheckProtocolOcr <<choice>>
+    state "Execute Lambda Rule Structurer Task (REQ-F-03)" as LambdaExtractRules
+    state "Invoke Bedrock Model JSON Enforcement (REQ-F-03)" as BedrockRulePrompt
+    state "PutItem to study-protocols Table (REQ-F-04)" as PersistProtocolRules
+    state "Route to SQS DLQ & Alert Admin (REQ-NF-03)" as ProtocolErrorState
+
+    StartProtocolExecution --> StartProtocolOcr
+    StartProtocolOcr --> WaitForProtocolOcr: StartDocumentAnalysis(Tables, Forms)
+    WaitForProtocolOcr --> CheckProtocolOcr: Task Token Received
+    
+    CheckProtocolOcr --> LambdaExtractRules: OCR Status == SUCCEEDED
+    CheckProtocolOcr --> StartProtocolOcr: Catch [Transient Error - Retry with Backoff]
+    CheckProtocolOcr --> ProtocolErrorState: OCR Status == FAILED / Retries Exhausted
+
+    LambdaExtractRules --> BedrockRulePrompt: Send Formatted Markdown Text
+    BedrockRulePrompt --> PersistProtocolRules: Valid Structured JSON Rules Returned
+    BedrockRulePrompt --> LambdaExtractRules: Catch [Throttling / Retry with Backoff]
+    BedrockRulePrompt --> ProtocolErrorState: Catch [Schema Violation / Fatal Error]
+
+    PersistProtocolRules --> [*]: Protocol Onboarding Succeeded
+    ProtocolErrorState --> [*]: Execution Terminated (DLQ Captured)
+```
+
+### 2.3 Detailed Pipeline Stages:
+1. **Document Ingestion (`(REQ-F-01)`):** The study coordinator uploads `protocol.pdf` to `s3://protocol-data-upload/{StudyID}/`.
+2. **State Machine Execution Trigger (`(REQ-F-02)`):** S3 ObjectCreated event routes via Amazon EventBridge to launch the Protocol Onboarding Step Functions state machine with input `{StudyID, Bucket, Key}`.
+3. **Asynchronous Layout & Form OCR (`(REQ-F-02)`):** Step Functions starts Amazon Textract `StartDocumentAnalysis` with `TABLES` and `FORMS` feature types, pausing execution until Textract completes.
+4. **Structured Rule Extraction (`(REQ-F-03)`):** Step Functions executes a Lambda task passing the extracted text to an LLM on Amazon Bedrock (Amazon Nova Pro / Anthropic Claude 3.5 Sonnet) enforcing the itemized `study-protocols` JSON schema.
+5. **Rule Persistence (`(REQ-F-04)`):** Structured rules are written to the `study-protocols` DynamoDB table under primary key `StudyID`.
 
 ---
 
 ## 3. Workflow 2: Automated Patient Screening Pipeline
 
-This workflow processes multi-file patient records (up to 150 MB total, digital or scanned faxes/records) and performs RAG-augmented deterministic reasoning against protocol criteria.
+This workflow processes multi-file patient records (up to 150 MB total, digital or scanned faxes/records) and performs RAG-augmented deterministic reasoning against protocol criteria using an AWS Step Functions state machine.
+
+### 3.1 Component Flow Diagram
 
 ```mermaid
 graph TD
@@ -120,13 +163,56 @@ graph TD
     INVOKE_AGENT -.->|"On Unhandled Error"| SQS_DLQ
 ```
 
-### Execution Steps & State Specifications:
-1. **Multi-File Trigger (`[REQ-F-05, REQ-F-06]`):** Clinical staff upload 1 or more PDF records to `s3://patient-data-upload/{PatientID}/`. S3 ObjectCreated triggers an EventBridge rule executing the Step Functions state machine.
-2. **Parallel Asynchronous OCR (`[REQ-F-07]`):** Step Functions executes a dynamic `Map` state over all uploaded files. Each iteration executes `StartDocumentAnalysis` with an SQS/SNS completion callback.
-3. **Raw Text Storage & Ingestion (`[REQ-F-08, REQ-F-09]`):** Extracted text is saved in `s3://patient-extracted-data/{PatientID}/`. Step Functions triggers `StartIngestionJob` on Amazon Bedrock Knowledge Bases.
-4. **Vector Embedding & Chunk Metadata (`[REQ-F-10, REQ-F-11]`):** Bedrock Knowledge Bases automatically chunks the text (512 tokens with 20% overlap), generates embeddings using `amazon.titan-embed-text-v2`, and indexes chunks with metadata (`patient_id`, `source_filename`, `page_number`).
-5. **Deterministic Single-Agent Reasoning (`[REQ-F-12, REQ-F-13, REQ-F-14]`):** A single Bedrock Agent receives `{PatientID, StudyID}`, fetches active criteria from DynamoDB `study-protocols`, queries Bedrock Knowledge Base filtered by `metadata.patient_id == {PatientID}` (`[REQ-NF-02]`), and populates the structured JSON verdict (`MET`, `NOT_MET`, `UNCERTAIN`) with citations and exact quotes.
-6. **Persistence & Auditing (`[REQ-F-15]`):** Output verdict written to `patient-verdicts` with default status `PENDING`.
+### 3.2 Patient Screening State Machine (`stateDiagram-v2`)
+
+```mermaid
+stateDiagram-v2
+    [*] --> InitScreeningExecution: S3 Event Trigger (PatientID, StudyID)
+    
+    state "Parallel Map State: Process Patient PDFs (REQ-F-07)" as MapStateOcr {
+        [*] --> LaunchAsyncOcr: Item = PDF S3 Key
+        state "Start Textract Async Job" as LaunchAsyncOcr
+        state "Wait for Completion Token" as WaitForOcrToken
+        LaunchAsyncOcr --> WaitForOcrToken: StartDocumentAnalysis
+        WaitForOcrToken --> [*]: Single PDF OCR Success
+    }
+    
+    state "Save Extracted Text to S3 (REQ-F-08)" as SaveExtractedText
+    state "Trigger Bedrock KB Ingestion (REQ-F-09)" as StartKbIngest
+    state "Poll KB Ingestion Job Status" as PollKbStatus
+    state "Check Ingestion Status" as CheckKbChoice <<choice>>
+    state "Invoke Single Bedrock Agent (REQ-F-12, REQ-F-14)" as InvokeAgentTask
+    state "PutItem to patient-verdicts Table (REQ-F-15)" as PersistVerdictTable
+    state "Route to SQS DLQ & Alert Reviewer (REQ-NF-03)" as ScreeningErrorState
+
+    InitScreeningExecution --> MapStateOcr: Validate Input Metadata
+    MapStateOcr --> SaveExtractedText: All Files Completed Successfully
+    MapStateOcr --> MapStateOcr: Catch [RateLimit / Retry with Exponential Backoff]
+    MapStateOcr --> ScreeningErrorState: Catch [Fatal OCR Error / 3x Retries Exceeded]
+
+    SaveExtractedText --> StartKbIngest: Write Extracted Text to S3
+    StartKbIngest --> PollKbStatus: StartIngestionJob Call
+    PollKbStatus --> CheckKbChoice: Fetch Status After 10s Wait
+    
+    CheckKbChoice --> InvokeAgentTask: Status == COMPLETE
+    CheckKbChoice --> PollKbStatus: Status == IN_PROGRESS
+    CheckKbChoice --> ScreeningErrorState: Status == FAILED
+
+    InvokeAgentTask --> PersistVerdictTable: Structured Verdict JSON (MET, NOT_MET, UNCERTAIN)
+    InvokeAgentTask --> InvokeAgentTask: Catch [Bedrock Throttling / Retry with Backoff]
+    InvokeAgentTask --> ScreeningErrorState: Catch [Agent Invocation Failure]
+
+    PersistVerdictTable --> [*]: Screening Succeeded (Status = PENDING Review)
+    ScreeningErrorState --> [*]: Execution Failed (Captured in DLQ)
+```
+
+### 3.3 Execution Steps & State Specifications:
+1. **Multi-File Trigger (`(REQ-F-05, REQ-F-06)`):** Clinical staff upload 1 or more PDF records to `s3://patient-data-upload/{PatientID}/`. S3 ObjectCreated triggers an EventBridge rule executing the Step Functions state machine.
+2. **Parallel Asynchronous OCR (`(REQ-F-07)`):** Step Functions executes a dynamic `Map` state over all uploaded files. Each iteration executes `StartDocumentAnalysis` with an SQS/SNS completion callback.
+3. **Raw Text Storage & Ingestion (`(REQ-F-08, REQ-F-09)`):** Extracted text is saved in `s3://patient-extracted-data/{PatientID}/`. Step Functions triggers `StartIngestionJob` on Amazon Bedrock Knowledge Bases.
+4. **Vector Embedding & Chunk Metadata (`(REQ-F-10, REQ-F-11)`):** Bedrock Knowledge Bases automatically chunks the text (512 tokens with 20% overlap), generates embeddings using `amazon.titan-embed-text-v2`, and indexes chunks with metadata (`patient_id`, `source_filename`, `page_number`).
+5. **Deterministic Single-Agent Reasoning (`(REQ-F-12, REQ-F-13, REQ-F-14)`):** A single Bedrock Agent receives `{PatientID, StudyID}`, fetches active criteria from DynamoDB `study-protocols`, queries Bedrock Knowledge Base filtered by `metadata.patient_id == {PatientID}` (`(REQ-NF-02)`), and populates the structured JSON verdict (`MET`, `NOT_MET`, `UNCERTAIN`) with citations and exact quotes.
+6. **Persistence & Auditing (`(REQ-F-15)`):** Output verdict written to `patient-verdicts` with default status `PENDING`.
 
 ---
 
