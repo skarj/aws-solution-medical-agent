@@ -1,1 +1,1 @@
-Simplified AI-Assisted Clinical Trial Screening Platform inpired by the solution from AWS Blog https://aws.amazon.com/blogs/architecture/ai-agents-for-clinical-trial-screening/
+Simplified AI-Assisted Clinical Trial Screening Platform inpired by the solution from AWS Blog https://aws.amazon.com/blogs/architecture/ai-agents-for-clinical-trial-screening/. The main idea is to speedup the development of AWS Solutions and have more accurate cost estimations with AI agent.
