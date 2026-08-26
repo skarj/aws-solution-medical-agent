@@ -3,8 +3,8 @@
 The AI-Assisted Clinical Trial Screening Platform is designed with a fully serverless, pay-per-use architecture that eliminates fixed 24/7 idle compute and database cluster fees.
 
 * **Governing Requirement:** `[REQ-COST-01]` (Total AWS infrastructure spend under $5,000.00 / year / ~$416.66 / month).
-* **Projected Baseline Operational Spend:** **$305.00 – $365.00 / month** (**$3,660.00 – $4,380.00 / year**).
-* **Budget Status: Fully compliant.** The baseline (low) figure is **26.8% under** the `[REQ-COST-01]` ceiling; the high end of the estimation range is **12.3% under** it. All major line items (Textract, Claude Sonnet 5, Bedrock KB storage & retrieval) are now verified against the AWS Price List API as of 2026-08-26.
+* **Projected Baseline Operational Spend:** **$305.20 – $394.85 / month** (**$3,662.40 – $4,738.20 / year**).
+* **Budget Status: Fully compliant.** The baseline (low) figure is **26.8% under** the `[REQ-COST-01]` ceiling; the high end of the estimation range is **5.2% under** it. All major line items (Textract, Claude Sonnet 5, Bedrock KB storage & retrieval) are now verified against the AWS Price List API as of 2026-08-26.
 * **Verified against the AWS Price List API**: Amazon Textract `TABLES` - only pricing ($0.015/page, SKU `FYDFD3P65PH8TD44`), Anthropic Claude Sonnet 5 On-Demand token pricing (`us-west-2`, effective 2026-08-01) for both `[REQ-F-05]` (protocol extraction) and `[REQ-F-14]`/`[REQ-F-16]` (screening agent), Bedrock Knowledge Base storage ($5.00/GB-month, SKU `JRZB7PVKGZES2CSN`) and retrieval ($0.001/query, SKU `2DQE6Z4P7GCN66WT`), and S3 Standard API request rates (PUT $0.005/1k, GET $0.0004/1k). All previously unverified estimates now carry exact SKU citations.
 
 ---
@@ -19,7 +19,7 @@ All quantitative pricing calculations derive strictly from the operational metri
 | **Patient Record Volume** | 2 PDFs / patient (avg 100 pages / file) | 200 pages / patient = **20,000 pages / month** |
 | **Average Patient File Size** | 25 MB – 50 MB / PDF | 50 MB – 100 MB total per patient record |
 | **Monthly Ingestion Data Volume** | 100 patients × 75 MB avg = **7.5 GB / month** | S3 Standard Ingestion |
-| **Study Protocol Onboarding** | 2 protocols / month (avg 100 pages each) | **200 pages / month** OCR volume |
+| **Study Protocol Onboarding** | 2 protocols / month (avg 100 pages each) | **[Agent Assumption — Unsourced]** `Requirements.md` states no protocol-upload rate; this figure is not derived from Requirements.md and needs human confirmation per `AGENT.md` Rule 7. **200 pages / month** OCR volume |
 | **RAG Queries per Screening** | 12 criteria / study × 5 retrieved chunks | 60 retrieval queries per patient screening |
 | **Clinical Review API Access** | ~100 reviews / month × 50 requests/review | ~5,000 API calls & Presigned S3 fetches |
 
