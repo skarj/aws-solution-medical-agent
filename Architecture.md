@@ -121,7 +121,7 @@ graph TD
     TEXTRACT_ASYNC["Amazon Textract Async Jobs"]
     TITAN_EMB["Titan Embeddings v2 and Vector Store"]
     DDB_PROTO["DynamoDB: study-protocols"]
-    BEDROCK_AGENT["Amazon Bedrock Reasoning Agent"]
+    BEDROCK_AGENT["Amazon Bedrock Agent: Anthropic Claude Sonnet 5"]
     DDB_VERDICT["DynamoDB: patient-verdicts Table"]
 
     CLINICIAN -->|"Uploads Multi-PDF Records"| S3_PATIENT
@@ -195,7 +195,7 @@ stateDiagram-v2
 2. **Parallel Asynchronous OCR (`[REQ-F-09]`):** Step Functions executes a dynamic `Map` state over all uploaded files. Each iteration calls `StartDocumentAnalysis`, then polls `GetDocumentAnalysis` on a `Wait`/`Choice` loop (5-second interval) per item until `SUCCEEDED` or `FAILED` — Amazon Textract has no native Step Functions callback integration, so each Map iteration polls independently rather than waiting on a shared notification.
 3. **Raw Text Storage & Ingestion (`[REQ-F-10, REQ-F-11]`):** Extracted text is saved in `s3://patient-extracted-data/{PatientID}/`. Step Functions triggers `StartIngestionJob` on Amazon Bedrock Knowledge Bases.
 4. **Vector Embedding & Chunk Metadata (`[REQ-F-12, REQ-F-13]`):** Bedrock Knowledge Bases automatically chunks the text (512 tokens with 20% overlap), generates embeddings using `amazon.titan-embed-text-v2`, and indexes chunks with metadata (`patient_id`, `source_filename`, `page_number`).
-5. **Deterministic Single-Agent Reasoning (`[REQ-F-14, REQ-F-15, REQ-F-16]`):** A single Bedrock Agent receives `{PatientID, StudyID}`, fetches active criteria from DynamoDB `study-protocols`, queries Bedrock Knowledge Base filtered by `metadata.patient_id == {PatientID}` (`[REQ-NF-02]`), and populates the structured JSON verdict (`MET`, `NOT_MET`, `UNCERTAIN`) with citations and exact quotes.
+5. **Deterministic Single-Agent Reasoning (`[REQ-F-14, REQ-F-15, REQ-F-16]`):** A single Bedrock Agent powered by **Anthropic Claude Sonnet 5** (mandated by `[REQ-F-14]`, updated 2026-08-25 from a model-agnostic requirement) receives `{PatientID, StudyID}`, fetches active criteria from DynamoDB `study-protocols`, queries Bedrock Knowledge Base filtered by `metadata.patient_id == {PatientID}` (`[REQ-NF-02]`), and populates the structured JSON verdict (`MET`, `NOT_MET`, `UNCERTAIN`) with citations and exact quotes. As with the protocol-extraction Lambda in Workflow 1, the agent's `foundationModel` is set to the Geographic (US) cross-Region inference profile `us.anthropic.claude-sonnet-5` (via `CreateAgent`'s `foundationModel` field) rather than a bare model ID, since Claude Sonnet 5 has no `us-west-2` In-Region support — permitted by the `[REQ-OPS-01]` relaxation; see `Security.md`.
 6. **Persistence & Auditing (`[REQ-F-17]`):** Output verdict written to `patient-verdicts` with default status `PENDING`.
 
 ---

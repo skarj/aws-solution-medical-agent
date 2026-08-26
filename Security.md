@@ -116,9 +116,9 @@ All compute resources (Lambda, Step Functions, Bedrock Agents) operate under ded
 ```
 
 #### Protocol Rule Structurer Lambda Execution Role Policy (Excerpt) — Scoped to `[REQ-F-05]` Mandated Model:
-This role is intentionally distinct from the Bedrock Agent Execution Role below. `[REQ-F-05]` mandates **Anthropic Claude Sonnet 5** exclusively for one-time protocol rule extraction (updated from a generic "Claude Sonnet" mandate on 2026-08-25); least-privilege IAM enforces that mandate at the policy level, rather than relying solely on prompt/application logic.
+This role is intentionally distinct from the Bedrock Agent Execution Role below. `[REQ-F-05]` mandates **Anthropic Claude Sonnet 5** exclusively for one-time protocol rule extraction. Least-privilege IAM enforces that mandate at the policy level, rather than relying solely on prompt/application logic.
 
-**Resolved 2026-08-25 — updated for Claude Sonnet 5's cross-Region inference requirement:** Verified against `docs.aws.amazon.com`, Claude Sonnet 5 has no `bedrock-runtime` In-Region support in *any* AWS Region and can only be invoked via a Geographic (US) or Global cross-Region inference profile. `[REQ-OPS-01]` was relaxed to permit the Geographic (US) profile specifically (see `Requirements.md`). Per AWS's documented IAM pattern for Geographic cross-Region inference, the policy below grants `bedrock:InvokeModel` on both the inference-profile ARN and the underlying foundation-model ARN in the source Region and each destination Region the profile can route to, scoped with a `Condition` on `bedrock:InferenceProfileArn` so the foundation-model grant cannot be used outside that profile. The destination-Region list (`us-east-1`, `us-east-2`) is carried over from the equivalent table published for Claude Sonnet 4.5, since Claude Sonnet 5's own model-card page did not expose a per-source-Region breakdown at review time — **reconfirm this list against the live Bedrock console or `GetInferenceProfile` before production deployment**, and note AWS's Claude Sonnet 5 documentation describes the US profile as keeping data within "US and Canada," so a `ca-central-1` destination should also be verified/excluded if strict US-only residency is required.
+Claude Sonnet 5 has no `bedrock-runtime` In-Region support in *any* AWS Region and can only be invoked via a Geographic (US) or Global cross-Region inference profile. `[REQ-OPS-01]` was relaxed to permit the Geographic (US) profile specifically (see `Requirements.md`). Per AWS's documented IAM pattern for Geographic cross-Region inference, the policy below grants `bedrock:InvokeModel` on both the inference-profile ARN and the underlying foundation-model ARN in the source Region and each destination Region the profile can route to, scoped with a `Condition` on `bedrock:InferenceProfileArn` so the foundation-model grant cannot be used outside that profile. The destination-Region list (`us-east-1`, `us-east-2`) is carried over from the equivalent table published for Claude Sonnet 4.5, since Claude Sonnet 5's own model-card page did not expose a per-source-Region breakdown at review time — **reconfirm this list against the live Bedrock console or `GetInferenceProfile` before production deployment**, and note AWS's Claude Sonnet 5 documentation describes the US profile as keeping data within "US and Canada," so a `ca-central-1` destination should also be verified/excluded if strict US-only residency is required.
 ```json
 {
   "Version": "2012-10-17",
@@ -171,24 +171,40 @@ This role is intentionally distinct from the Bedrock Agent Execution Role below.
 }
 ```
 
-#### Bedrock Agent Execution Role Policy (Excerpt):
-This role serves the single patient-screening Bedrock Agent (`[REQ-F-14, REQ-F-16]`), which has no mandated model — Nova Pro and Claude 3.5 Sonnet remain valid alternatives for verdict generation, unlike the protocol extraction role above.
+#### Bedrock Agent Execution Role Policy:
+This role serves the single patient-screening Bedrock Agent. `[REQ-F-14]` mandates **Anthropic Claude Sonnet 5** for this agent. Claude Sonnet 5 has no `bedrock-runtime` In-Region support in any AWS Region, so — same as the Protocol Rule Structurer Lambda role above — this policy grants `bedrock:InvokeModel` via the Geographic (US) cross-Region inference profile `us.anthropic.claude-sonnet-5`, per the `[REQ-OPS-01]` relaxation. Per AWS's [documentation for Amazon Bedrock Agents](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-create.html), the inference profile ID is passed in the `foundationModel` field of `CreateAgent`, not a bare foundation-model ID. The same reconfirmation caveats noted above apply (destination-Region list carried over from Claude Sonnet 4.5's table; possible `ca-central-1` inclusion per AWS's Claude Sonnet 5 "US and Canada" wording).
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "AllowBedrockModelInvocation",
+      "Sid": "AllowClaudeSonnet5GeoUsInferenceProfileForAgent",
       "Effect": "Allow",
       "Action": [
         "bedrock:InvokeModel",
         "bedrock:Retrieve"
       ],
       "Resource": [
-        "arn:aws:bedrock:*:*:foundation-model/amazon.nova-pro-v1:0",
-        "arn:aws:bedrock:*:*:foundation-model/anthropic.claude-3-5-sonnet-*",
+        "arn:aws:bedrock:us-west-2:*:inference-profile/us.anthropic.claude-sonnet-5",
         "arn:aws:bedrock:*:*:knowledge-base/*"
       ]
+    },
+    {
+      "Sid": "AllowClaudeSonnet5FoundationModelAcrossGeoUsDestinationsForAgent",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5",
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5",
+        "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "bedrock:InferenceProfileArn": "arn:aws:bedrock:us-west-2:*:inference-profile/us.anthropic.claude-sonnet-5"
+        }
+      }
     },
     {
       "Sid": "AllowDynamoDBReadProtocols",

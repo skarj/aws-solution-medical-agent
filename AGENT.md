@@ -38,32 +38,26 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 ### 5. Audit Logging Schema
 * Immediately after editing any repository file, append an entry to `Log.md` using the exact format:
   `[YYYY-MM-DD HH:MM UTC] | [FILE CHANGED] | [SUMMARY OF CHANGE] | [TARGET REQ ID / PROMPT INTENT]`
-
-### 6. Deprecation & File Preservation
-* Never delete files or erase historical context.
-* Move superseded architectural components, pricing models, or requirements to an `## Archive` section at the bottom of the target file.
-
-### 7. Diagrams & Visualization Standards
+### 6. Diagrams & Visualization Standards
 * Render system architecture, data flows, and subnets in `Architecture.md` using Mermaid.js (`graph TD` or `sequenceDiagram`).
 * Render AWS Step Functions state machines using Mermaid `stateDiagram-v2`. Visually segregate `Choice` branches, `Catch`/`Retry` flows, and error handling states.
 * **Sanitize Node Labels**: Require double quotes around all node labels (e.g., `nodeA["API Gateway (REST)"]`) to prevent syntax errors.
 * **Subgraphs**: Use `subgraph` blocks to visually segregate AWS Accounts, Regions, VPCs, Public/Private Subnets, and third-party systems.
 * **Sub-Diagrams**: Split large architectures into focused diagrams (e.g., High-Level Topology vs. Ingestion Flow) to prevent visual clutter.
 
-### 8. Tool-Assisted Cost Modeling (MCP Integration)
-* When updating `Cost.md`, invoke the `aws-pricing-mcp` or `aws-calculator` tool rather than relying on memory.
-* Populate `Cost.md` with verified API response data, including pricing timestamps and official `calculator.aws` shareable estimate URLs when generated.
+### 7. Tool-Assisted Cost Modeling
+* When updating `Cost.md`, invoke the `aws-billing` MCP rather than relying on memory.
 * **MCP Fallback**: If pricing MCP tools are unavailable, clearly mark estimates as `[Estimated - Unverified]` and document standard unit pricing assumptions.
 * Derive all quantitative pricing parameters (e.g., IOPS, GB/month runtime, API requests/sec) directly from capacity goals in `Requirements.md`.
 
-### 9. Tool-Assisted Documentation Verification (MCP Integration)
-* **Live Search**: When updating `Services.md`, `Security.md`, or `Architecture.md`, invoke `aws-docs-mcp` to query official AWS documentation.
+### 8. Tool-Assisted Documentation Verification 
+* **Live Search**: When updating `Services.md`, `Security.md`, or `Architecture.md`, invoke `aws-docs` MCP to query official AWS documentation.
 * **URL Validation**: Every AWS service listed in `Services.md` must feature a live link retrieved directly via documentation MCP queries under `docs.aws.amazon.com`.
 * **Exact Syntax Verification**: Verify IAM action names, Step Functions task definitions, and service quotas via documentation search before committing updates to `Security.md` or `Architecture.md`.
 
-### 10. AWS Well-Architected Guardrail
+### 9. AWS Well-Architected Guardrail
 * Prior to committing updates, evaluate designs against AWS Well-Architected Framework pillars.
 * Proactively alert the human to security risks (e.g., public storage, missing KMS encryption keys), single points of failure, or payload limits (e.g., Step Functions 256 KB state limit) before finalizing `[Draft]` items.
 
-### 11. Tone & Style
+### 10. Tone & Style
 * Write in clear, direct, technical prose. Avoid marketing fluff, filler adjectives, or setup chatter.
