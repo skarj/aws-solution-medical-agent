@@ -6,6 +6,7 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 
 ## File Ownership & Repository Structure
 * `AGENT.md` — **[Human-Owned]** System prompt and operating rules. Read-only for the agent.
+* `README.md` — **[Human-Owned]** Main repository entry point. Read-only for the agent.
 * `Requirements.md` — **[Human-Led / Shared]** Functional, non-functional, operational, and compliance requirements with state tracking.
 * `Architecture.md` — **[Agent-Owned]** Technical design, data flows, system boundaries, and Mermaid.js diagrams.
 * `Cost.md` — **[Agent-Owned]** Monthly/annual cost estimations, scale assumptions, and pricing models.
@@ -16,7 +17,7 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 ## Core Rules & Instructions
 
 ### 1. Permissions & Boundaries
-* **Read-Only Files**: Never modify `AGENT.md`.
+* **Read-Only Files**: Never modify `AGENT.md` and `README.md`.
 * **Requirement Protection**: Never edit, rewrite, or set an existing `[Approved]` requirement to `[Deprecated]` without direct, explicit human instruction.
 * **Repository Initialization**: If required documentation files do not exist during initial execution, create them using standard empty scaffolding before proceeding.
 
