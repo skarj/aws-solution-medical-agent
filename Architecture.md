@@ -8,15 +8,15 @@ graph LR
     S3["Amazon S3 Buckets"]
     SFN["AWS Step Functions State Machines"]
     OCR["Amazon Textract OCR"]
-    KB["Bedrock Knowledge Base and Vectors"]
+    CONSOLIDATE["Full-Text Document Consolidation"]
     AGENT["Bedrock Reasoning Agent"]
     DDB["Amazon DynamoDB Tables"]
 
     WEB -->|"Uploads Records and Protocols"| S3
     S3 -->|"Triggers State Machines"| SFN
     SFN -->|"Executes Async OCR"| OCR
-    OCR -->|"Indexes Documents"| KB
-    KB -->|"Retrieves Context"| AGENT
+    OCR -->|"Merges Pages into Full-Text Document"| CONSOLIDATE
+    CONSOLIDATE -->|"Delivers Complete Document Context"| AGENT
     AGENT -->|"Saves Rules and Verdicts"| DDB
     DDB -->|"Displays AI Checklist"| WEB
 ```
@@ -115,11 +115,11 @@ graph TD
     SFN_START["Execution Start: PatientID, StudyID"]
     MAP_OCR["Map State: Parallel OCR"]
     S3_EXTRACT["S3: patient-extracted-data"]
-    KB_INGEST["Bedrock KB StartIngestionJob"]
-    INVOKE_AGENT["Invoke Single Bedrock Agent"]
+    LAMBDA_CONSOLIDATE["Lambda: Patient Text Consolidator"]
+    S3_CONSOLIDATED["S3: patient-consolidated-text"]
+    LAMBDA_SCREEN["Lambda: patient-screening-handler"]
     SQS_DLQ["Amazon SQS Dead Letter Queue"]
     TEXTRACT_ASYNC["Amazon Textract Async Jobs"]
-    TITAN_EMB["Titan Embeddings v2 and Vector Store"]
     DDB_PROTO["DynamoDB: study-protocols"]
     BEDROCK_AGENT["Amazon Bedrock Agent: Anthropic Claude Sonnet 5"]
     DDB_VERDICT["DynamoDB: patient-verdicts Table"]
@@ -131,15 +131,15 @@ graph TD
     MAP_OCR -->|"Parallel StartDocumentAnalysis Async"| TEXTRACT_ASYNC
     MAP_OCR -->|"Polls GetDocumentAnalysis Per Item"| TEXTRACT_ASYNC
     TEXTRACT_ASYNC -->|"Extracted Text on SUCCEEDED"| S3_EXTRACT
-    S3_EXTRACT --> KB_INGEST
-    KB_INGEST -->|"Chunking and Embeddings"| TITAN_EMB
-    KB_INGEST --> INVOKE_AGENT
-    INVOKE_AGENT -->|"Pull Protocol Rules"| DDB_PROTO
-    INVOKE_AGENT -->|"RAG Query patient_id"| TITAN_EMB
-    INVOKE_AGENT -->|"Execute Single-Agent Evaluation"| BEDROCK_AGENT
-    BEDROCK_AGENT -->|"Structured Verdict JSON"| DDB_VERDICT
+    S3_EXTRACT -->|"Reads All Per-File Extracted Text"| LAMBDA_CONSOLIDATE
+    LAMBDA_CONSOLIDATE -->|"Writes Ordered, Page-Annotated Full Text"| S3_CONSOLIDATED
+    S3_CONSOLIDATED -->|"Claim-Check Pointer"| LAMBDA_SCREEN
+    LAMBDA_SCREEN -->|"Pull Protocol Rules"| DDB_PROTO
+    LAMBDA_SCREEN -->|"Invoke With Complete Document Text"| BEDROCK_AGENT
+    BEDROCK_AGENT -->|"Structured Verdict JSON"| LAMBDA_SCREEN
+    LAMBDA_SCREEN -->|"PutItem Verdict"| DDB_VERDICT
     MAP_OCR -.->|"On Failure Retries Exceeded"| SQS_DLQ
-    INVOKE_AGENT -.->|"On Unhandled Error"| SQS_DLQ
+    LAMBDA_SCREEN -.->|"On Unhandled Error"| SQS_DLQ
 ```
 
 ### 3.2 Patient Screening State Machine (`stateDiagram-v2`)
@@ -162,10 +162,9 @@ stateDiagram-v2
     }
     
     state "Save Extracted Text to S3" as SaveExtractedText
-    state "Trigger Bedrock KB Ingestion" as StartKbIngest
-    state "Poll KB Ingestion Job Status" as PollKbStatus
-    state "Check Ingestion Status" as CheckKbChoice <<choice>>
-    state "Invoke Single Bedrock Agent" as InvokeAgentTask
+    state "Execute Lambda Text Consolidator Task" as ConsolidateText
+    state "Write Full-Text Document to S3 (Claim-Check)" as SaveConsolidatedText
+    state "Execute Lambda patient-screening-handler Task" as InvokeAgentTask
     state "PutItem to patient-verdicts Table" as PersistVerdictTable
     state "Route to SQS DLQ & Alert Reviewer" as ScreeningErrorState
 
@@ -174,14 +173,11 @@ stateDiagram-v2
     MapStateOcr --> MapStateOcr: Catch [RateLimit / Retry with Exponential Backoff]
     MapStateOcr --> ScreeningErrorState: Catch [Fatal OCR Error / 3x Retries Exceeded]
 
-    SaveExtractedText --> StartKbIngest: Write Extracted Text to S3
-    StartKbIngest --> PollKbStatus: StartIngestionJob Call
-    PollKbStatus --> CheckKbChoice: Fetch Status After 10s Wait
-    
-    CheckKbChoice --> InvokeAgentTask: Status == COMPLETE
-    CheckKbChoice --> PollKbStatus: Status == IN_PROGRESS
-    CheckKbChoice --> ScreeningErrorState: Status == FAILED
+    SaveExtractedText --> ConsolidateText: Write Extracted Text to S3
+    ConsolidateText --> SaveConsolidatedText: Merge All Files into Ordered, Page-Annotated Text
+    ConsolidateText --> ScreeningErrorState: Catch [Consolidation Failure]
 
+    SaveConsolidatedText --> InvokeAgentTask: Pass S3 Pointer (Claim-Check)
     InvokeAgentTask --> PersistVerdictTable: Structured Verdict JSON (MET, NOT_MET, UNCERTAIN)
     InvokeAgentTask --> InvokeAgentTask: Catch [Bedrock Throttling / Retry with Backoff]
     InvokeAgentTask --> ScreeningErrorState: Catch [Agent Invocation Failure]
@@ -193,10 +189,10 @@ stateDiagram-v2
 ### 3.3 Execution Steps & State Specifications:
 1. **Multi-File Trigger (`[REQ-F-07, REQ-F-08]`):** The Clinical Investigator uploads 1 or more PDF records to `s3://patient-data-upload/{PatientID}/`. S3 ObjectCreated triggers an EventBridge rule executing the Step Functions state machine.
 2. **Parallel Asynchronous OCR (`[REQ-F-09]`):** Step Functions executes a dynamic `Map` state over all uploaded files. Each iteration calls `StartDocumentAnalysis`, then polls `GetDocumentAnalysis` on a `Wait`/`Choice` loop (5-second interval) per item until `SUCCEEDED` or `FAILED` — Amazon Textract has no native Step Functions callback integration, so each Map iteration polls independently rather than waiting on a shared notification.
-3. **Raw Text Storage & Ingestion (`[REQ-F-10, REQ-F-11]`):** Extracted text is saved in `s3://patient-extracted-data/{PatientID}/`. Step Functions triggers `StartIngestionJob` on Amazon Bedrock Knowledge Bases.
-4. **Vector Embedding & Chunk Metadata (`[REQ-F-12, REQ-F-13]`):** Bedrock Knowledge Bases automatically chunks the text (512 tokens with 20% overlap), generates embeddings using `amazon.titan-embed-text-v2`, and indexes chunks with metadata (`patient_id`, `source_filename`, `page_number`).
-5. **Deterministic Single-Agent Reasoning (`[REQ-F-14, REQ-F-15, REQ-F-16]`):** A single Bedrock Agent powered by **Anthropic Claude Sonnet 5** (mandated by `[REQ-F-14]`, updated 2026-08-25 from a model-agnostic requirement) receives `{PatientID, StudyID}`, fetches active criteria from DynamoDB `study-protocols`, queries Bedrock Knowledge Base filtered by `metadata.patient_id == {PatientID}` (`[REQ-NF-02]`), and populates the structured JSON verdict (`MET`, `NOT_MET`, `UNCERTAIN`) with citations and exact quotes. As with the protocol-extraction Lambda in Workflow 1, the agent's `foundationModel` is set to the Geographic (US) cross-Region inference profile `us.anthropic.claude-sonnet-5` (via `CreateAgent`'s `foundationModel` field) rather than a bare model ID, since Claude Sonnet 5 has no `us-west-2` In-Region support — permitted by the `[REQ-OPS-01]` relaxation; see `Security.md`.
-6. **Persistence & Auditing (`[REQ-F-17]`):** Output verdict written to `patient-verdicts` with default status `PENDING`.
+3. **Raw Text Storage & Full-Document Consolidation (`[REQ-F-10, REQ-F-11]`):** Extracted text is saved in `s3://patient-extracted-data/{PatientID}/`, one object per uploaded file. Step Functions invokes the `Lambda: Patient Text Consolidator` task, which reads every per-file object for the `PatientID`, concatenates them in a stable order with explicit source-filename and page-number boundary markers, and writes a single ordered full-text document to `s3://patient-consolidated-text/{PatientID}/`. No chunking or embedding occurs — this replaces the prior Bedrock Knowledge Base ingestion/vector-indexing step per the 2026-08-27 RAG-to-full-document-reasoning decision (`[REQ-F-11], [REQ-NF-05]`).
+4. **Citation Metadata Preservation (`[REQ-F-13]`):** Every page boundary within the consolidated document retains its `patient_id`, `source_filename`, and `page_number` tags inline, so the reasoning step can still cite an exact source location for every claim without a vector index.
+5. **Deterministic Full-Document Single-Agent Reasoning (`[REQ-F-14, REQ-F-15, REQ-F-16, REQ-NF-04, REQ-NF-05]`):** Step Functions invokes `Lambda: patient-screening-handler` with `{PatientID, StudyID}` and the `[REQ-F-11]` S3 Claim-Check pointer (respecting the Step Functions 256 KB state limit, since the full consolidated text — roughly 130,000 tokens for an average 200-page patient record set — would exceed it). The Lambda reads the complete consolidated text from S3, fetches active criteria from DynamoDB `study-protocols`, and invokes a single Bedrock Agent powered by **Anthropic Claude Sonnet 5** (mandated by `[REQ-F-14]`) with the entire patient document passed as direct reasoning input — no retrieval step, no similarity search. Claude Sonnet 5's verified 1,000,000-token context window (`docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html`) comfortably holds the full document at baseline scale. The agent populates the structured JSON verdict (`MET`, `NOT_MET`, `UNCERTAIN`) with citations and exact quotes, setting `UNCERTAIN` rather than inferring when no supporting text exists (`[REQ-NF-04]`). As with the protocol-extraction Lambda in Workflow 1, the agent's `foundationModel` is set to the Geographic (US) cross-Region inference profile `us.anthropic.claude-sonnet-5` (via `CreateAgent`'s `foundationModel` field) rather than a bare model ID, since Claude Sonnet 5 has no `us-west-2` In-Region support — permitted by the `[REQ-OPS-01]` relaxation; see `Security.md`. **Open risk (flagged, not yet validated):** processing ~130,000 input tokens per screening (versus the prior ~24,000-token retrieved-chunk average) has not been latency-tested against the `[REQ-NF-01]` 10-minute end-to-end SLA; confirm actual Bedrock inference latency at this input size before production deployment.
+6. **Persistence & Auditing (`[REQ-F-17]`):** `Lambda: patient-screening-handler` writes the output verdict to `patient-verdicts` with default status `PENDING`.
 
 ---
 

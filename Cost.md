@@ -3,9 +3,9 @@
 The AI-Assisted Clinical Trial Screening Platform is designed with a fully serverless, pay-per-use architecture that eliminates fixed 24/7 idle compute and database cluster fees.
 
 * **Governing Requirement:** `[REQ-COST-01]` (Total AWS infrastructure spend under $5,000.00 / year / ~$416.66 / month).
-* **Projected Baseline Operational Spend:** **$305.20 – $394.85 / month** (**$3,662.40 – $4,738.20 / year**).
-* **Budget Status: Fully compliant.** The baseline (low) figure is **26.8% under** the `[REQ-COST-01]` ceiling; the high end of the estimation range is **5.2% under** it. All major line items (Textract, Claude Sonnet 5, Bedrock KB storage & retrieval) are now verified against the AWS Price List API as of 2026-08-26.
-* **Verified against the AWS Price List API**: Amazon Textract `TABLES` - only pricing ($0.015/page, SKU `FYDFD3P65PH8TD44`), Anthropic Claude Sonnet 5 On-Demand token pricing (`us-west-2`, effective 2026-08-01) for both `[REQ-F-05]` (protocol extraction) and `[REQ-F-14]`/`[REQ-F-16]` (screening agent), Bedrock Knowledge Base storage ($5.00/GB-month, SKU `JRZB7PVKGZES2CSN`) and retrieval ($0.001/query, SKU `2DQE6Z4P7GCN66WT`), and S3 Standard API request rates (PUT $0.005/1k, GET $0.0004/1k). All previously unverified estimates now carry exact SKU citations.
+* **Projected Baseline Operational Spend:** **$317.81 – $409.26 / month** (**$3,813.72 – $4,911.12 / year**).
+* **Budget Status: Compliant, but margin has compressed.** The baseline (low) figure is **23.7% under** the `[REQ-COST-01]` ceiling; the high end of the estimation range is only **1.8% under** it (down from 5.2% prior to this revision). This drop is driven entirely by the 2026-08-27 decision to replace RAG with full-document deterministic reasoning (`[REQ-F-11], [REQ-F-15]`): removing Bedrock Knowledge Base retrieval/embedding costs saved money, but feeding the full ~130,000-token patient document to Claude Sonnet 5 on every screening (vs. ~24,000 tokens of retrieved chunks) costs more net. **Flagged risk:** at $409.26/mo high end, normal month-to-month volume variance could push actual spend over the `[REQ-COST-01]` ceiling; recommend re-confirming actual token usage against Cost Explorer soon after production launch.
+* **Verified against the AWS Price List API**: Amazon Textract `TABLES` - only pricing ($0.015/page, SKU `FYDFD3P65PH8TD44`), Anthropic Claude Sonnet 5 On-Demand token pricing (`us-west-2`, effective 2026-08-01) for both `[REQ-F-05]` (protocol extraction) and `[REQ-F-14]`/`[REQ-F-16]` (screening agent), and S3 Standard API request rates (PUT $0.005/1k, GET $0.0004/1k). Bedrock Knowledge Base storage/retrieval pricing no longer applies as of 2026-08-27 (RAG removed).
 
 ---
 
@@ -20,7 +20,7 @@ All quantitative pricing calculations derive strictly from the operational metri
 | **Average Patient File Size** | 25 MB – 50 MB / PDF | 50 MB – 100 MB total per patient record |
 | **Monthly Ingestion Data Volume** | 100 patients × 75 MB avg = **7.5 GB / month** | S3 Standard Ingestion |
 | **Study Protocol Onboarding** | 2 protocols / month (avg 100 pages each) | **[Agent Assumption — Unsourced]** `Requirements.md` states no protocol-upload rate; this figure is not derived from Requirements.md and needs human confirmation per `AGENT.md` Rule 7. **200 pages / month** OCR volume |
-| **RAG Queries per Screening** | 12 criteria / study × 5 retrieved chunks | 60 retrieval queries per patient screening |
+| **Full-Document Reasoning Input per Screening** | 200 pages / patient × ~650 tokens / page (rate derived from `[REQ-F-05]`'s protocol-extraction sizing below) | **~130,000 input tokens / patient screening** — replaces RAG chunk retrieval per the 2026-08-27 `[REQ-F-11], [REQ-F-15]` decision |
 | **Clinical Review API Access** | ~100 reviews / month × 50 requests/review | ~5,000 API calls & Presigned S3 fetches |
 
 ---
@@ -36,34 +36,32 @@ All quantitative pricing calculations derive strictly from the operational metri
 
 ---
 
-### 3.2 AI, Embeddings & Generative Reasoning — Amazon Bedrock (`[REQ-F-05, REQ-F-11, REQ-F-14, REQ-F-16]`)
+### 3.2 AI & Generative Reasoning — Amazon Bedrock (`[REQ-F-05, REQ-F-11, REQ-F-14, REQ-F-16]`)
 
-#### A. Embedding Generation (`[REQ-F-11]` — Amazon Titan Text Embeddings v2):
-* **Monthly Tokens:** 20,200 pages × ~450 words = ~9,090,000 words = ~12,120,000 input tokens.
-* **Pricing Rate:** $0.00002 per 1,000 tokens.
-* **Monthly Calculation:** (12,120,000 / 1,000) × $0.00002 = **$0.24 / month**.
+**2026-08-27 change:** Removed the Amazon Titan Text Embeddings v2 subsection (previously ~$0.24/month) — no embeddings are generated under full-document deterministic reasoning (`[REQ-F-11]` superseded; RAG removed per direct human instruction).
 
-#### B. Protocol Rule Extraction (`[REQ-F-05]` — Anthropic Claude Sonnet 5):
+#### A. Protocol Rule Extraction (`[REQ-F-05]` — Anthropic Claude Sonnet 5):
 * **Monthly Workload:** 2 protocols × 100 pages = 130,000 input tokens; ~12,000 output tokens.
 * **Pricing Rate (verified via AWS Price List API, `us-west-2`, effective 2026-08-01):** Claude Sonnet 5 On-Demand is **$2.20/1M input, $11.00/1M output** tokens (Standard tier) or **$2.00/1M input, $10.00/1M output** (Standard, Global tier). It is unconfirmed which tier bills the Geographic (US) cross-Region inference profile used here (`us.anthropic.claude-sonnet-5`) — the Price List API exposes no distinct "Geo" rate, only Standard and Standard-Global. Using the Standard (higher, more conservative) rate:
 * **Monthly Calculation:** (130,000/1,000,000 × $2.20) + (12,000/1,000,000 × $11.00) = $0.286 + $0.132 = **$0.42 / month**.
 * **Estimated Monthly Range:** **$0.38 – $0.42 / month** (Global-tier rate at the low end, Standard-tier at the high end — confirm actual billed tier via Cost Explorer once deployed).
 
-#### C. Patient Screening Reasoning Agent (`[REQ-F-14, REQ-F-16]` — Anthropic Claude Sonnet 5):
-* **Input Context Tokens:** 100 patients × 12 criteria × 5 chunks = 2,400,000 input context tokens / month.
-* **Output Verdict Tokens:** 100 patients × 1,500 output tokens = 150,000 output tokens / month.
-* **Pricing Rate (verified via AWS Price List API, `us-west-2`, effective 2026-08-01):** Same Claude Sonnet 5 rates as §3.2.B above — `[REQ-F-14]` was updated on 2026-08-25 to mandate Claude Sonnet 5 for this agent (previously model-agnostic; Nova Pro / Claude 3.5 Sonnet are no longer applicable here).
-* **Token Cost:** (2,400,000/1,000,000 × $2.00–$2.20) + (150,000/1,000,000 × $10.00–$11.00) = $4.80–$5.28 + $1.50–$1.65 = **$6.30 – $6.93 / month**.
-* **RAG Retrieval Cost (verified via AWS Price List API, `us-west-2`, effective 2026-08-01):** 6,000 Knowledge Base queries/month (100 patients × 12 criteria × 5 chunks) at $0.001/query (standard retrieval; not agentic retrieval, which is $0.004/query and not applicable here) = **$6.00 / month** (SKU `2DQE6Z4P7GCN66WT`). This replaces the prior unverified "$15.00–$40.00/month Agent Orchestration & RAG Tool Calls" placeholder, which had no basis in AWS's published pricing.
-* **Estimated Monthly Subtotal:** **$12.30 – $12.93 / month** (fully verified).
+#### B. Patient Screening Reasoning Agent (`[REQ-F-14, REQ-F-16]` — Anthropic Claude Sonnet 5):
+* **2026-08-27 change:** Input sizing replaced RAG-retrieved chunks with the full consolidated patient document per `[REQ-F-11], [REQ-F-15]`, verified against Claude Sonnet 5's 1,000,000-token context window (`docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html`).
+* **Input Context Tokens:** 100 patients × ~130,000 tokens/patient (full-document text, §2 sizing table) = **13,000,000 input tokens / month**.
+* **Output Verdict Tokens:** 100 patients × 1,500 output tokens = 150,000 output tokens / month (unchanged — verdict JSON size is unaffected by input size).
+* **Pricing Rate (verified via AWS Price List API, `us-west-2`, effective 2026-08-01):** Same Claude Sonnet 5 rates as §3.2.A above — `[REQ-F-14]` mandates Claude Sonnet 5 for this agent.
+* **Token Cost:** (13,000,000/1,000,000 × $2.00–$2.20) + (150,000/1,000,000 × $10.00–$11.00) = $26.00–$28.60 + $1.50–$1.65 = **$27.50 – $30.25 / month**.
+* **RAG Retrieval Cost:** **$0.00 / month** — removed 2026-08-27; no Knowledge Base queries occur under full-document deterministic reasoning.
+* **Estimated Monthly Subtotal:** **$27.50 – $30.25 / month** (up from the prior $12.30–$12.93/month RAG-based figure; the ~5x input-token increase outweighs the removed $6.00/month retrieval cost).
 
 ---
 
-### 3.3 Storage & Vector Management (`[REQ-F-01, REQ-F-04, REQ-F-07, REQ-F-10, REQ-F-12]`)
+### 3.3 Storage (`[REQ-F-01, REQ-F-04, REQ-F-07, REQ-F-10, REQ-F-11]`)
+* **2026-08-27 change:** Removed Bedrock Knowledge Base vector storage (previously $2.50/month) — no vector index exists under full-document deterministic reasoning. The new `patient-consolidated-text` bucket (`[REQ-F-11]`) adds a second copy of already-extracted plain text per patient; text is negligible in size relative to the source PDFs already dominating the S3 storage figure below, so no separate line item is added — flagged as a minor, immaterial rounding assumption rather than a verified zero.
 * **Amazon S3 Storage:** 10 GB new data / month (~120 GB in Year 1) × $0.023/GB = ~$2.76 / month.
 * **S3 API Requests (verified via AWS Price List API, `us-west-2`, effective 2026-08-01):** ~500 PUTs/month × $0.005/1,000 + ~5,000 GETs/month × $0.0004/1,000 = negligible (~$0.005/month); presigned-URL generation and other document-access operations = ~$0.50 / month total.
-* **Bedrock Knowledge Base Vector Storage (verified via AWS Price List API, `us-west-2`, effective 2026-08-01):** $5.00/GB-month for serverless vector index storage (SKU `JRZB7PVKGZES2CSN`). Estimated 0.5 GB structured medical-record vectors = 0.5 × $5.00 = **$2.50 / month**. This replaces the prior unverified "$10.00–$35.00/month Serverless Vector Storage" estimate.
-* **Estimated Monthly Subtotal:** **$5.76 / month** (fully verified; ±10% for volume variance = **$5.20 – $6.35 / month**).
+* **Estimated Monthly Subtotal:** **$3.26 / month** (±10% for volume variance = **$2.93 – $3.59 / month**).
 
 ---
 
@@ -98,13 +96,13 @@ All quantitative pricing calculations derive strictly from the operational metri
 | Category | Primary AWS Services | Baseline Low (USD/mo) | Baseline High (USD/mo) | Governing REQ IDs |
 | :--- | :--- | :--- | :--- | :--- |
 | **Document Processing** | Amazon Textract (Async OCR, Tables only) | $273.00 | $333.00 | `[REQ-F-03, REQ-F-09]` |
-| **AI & Vector Reasoning** | Amazon Bedrock (Agent, KB, Titan, Claude Sonnet 5) | $13.00 | $13.50 | `[REQ-F-05, REQ-F-11, REQ-F-14, REQ-F-16]` |
-| **Storage & Vectors** | Amazon S3 + Bedrock Vector Store | $5.20 | $6.35 | `[REQ-F-01, REQ-F-04, REQ-F-07, REQ-F-10, REQ-F-12]` |
+| **AI Reasoning** | Amazon Bedrock (Agent, Claude Sonnet 5, full-document input) | $27.88 | $30.67 | `[REQ-F-05, REQ-F-11, REQ-F-14, REQ-F-16]` |
+| **Storage** | Amazon S3 (raw, extracted, and consolidated text) | $2.93 | $3.59 | `[REQ-F-01, REQ-F-04, REQ-F-07, REQ-F-10, REQ-F-11]` |
 | **Database Tier** | Amazon DynamoDB (On-Demand) | $1.00 | $5.00 | `[REQ-F-06, REQ-F-17]` |
 | **Orchestration & API** | Step Functions + Lambda + API Gateway | $2.00 | $7.00 | `[REQ-F-02, REQ-F-08, REQ-SEC-02]` |
 | **Security & Auditing** | AWS KMS + CloudWatch + CloudTrail + Cognito | $11.00 | $30.00 | `[REQ-SEC-01, REQ-SEC-04, REQ-SEC-05]` |
-| **Total Monthly Spend** | | **$305.20** | **$394.85** | `[REQ-COST-01]` |
-| **Total Annual Spend** | | **$3,662.40** | **$4,738.20** | **Budget Ceiling: $5,000.00 — baseline 26.8% under; high end 5.2% under (fully compliant)** |
+| **Total Monthly Spend** | | **$317.81** | **$409.26** | `[REQ-COST-01]` |
+| **Total Annual Spend** | | **$3,813.72** | **$4,911.12** | **Budget Ceiling: $5,000.00 — baseline 23.7% under; high end only 1.8% under (compliant, tight margin)** |
 
-**Note (2026-08-26, fully verified):** All major cost drivers now carry exact AWS Price List API citations (SKUs, effective dates): Amazon Textract (`TABLES`-only, $0.015/page), Anthropic Claude Sonnet 5 token pricing ($2.00–$2.20/1M input, $10.00–$11.00/1M output), Bedrock Knowledge Base storage ($5.00/GB-month) and retrieval ($0.001/query standard rate), and S3 Standard API request rates (PUT $0.005/1k, GET $0.0004/1k). The AI & Vector Reasoning row drops from $7–$48/mo (prior unverified high-end placeholder) to $13.00–$13.50/mo (fully verified): Titan embeddings $0.24/mo + Claude Sonnet 5 protocol extraction $0.38–$0.42/mo + Claude Sonnet 5 screening agent tokens $6.30–$6.93/mo + KB retrieval $6.00/mo. The Storage & Vectors row drops from $13–$38/mo to $5.20–$6.35/mo: S3 storage $2.76/mo + S3 API $0.50/mo + KB vector storage $2.50/mo. Total Monthly/Annual Spend now $305–$395/mo ($3,662–$4,738/yr) — both ends of the range are under the `[REQ-COST-01]` ceiling with comfortable margin.
+**Note (2026-08-27, RAG replaced with full-document deterministic reasoning per `[REQ-F-11], [REQ-F-15]`, direct human instruction):** Removed Bedrock Knowledge Base storage ($5.00/GB-month) and retrieval ($0.001/query) and Amazon Titan embedding costs entirely — no vector index exists. The AI Reasoning row rises from $13.00–$13.50/mo to $27.88–$30.67/mo: Claude Sonnet 5 protocol extraction $0.38–$0.42/mo (unchanged) + Claude Sonnet 5 screening agent tokens $27.50–$30.25/mo (up from $6.30–$6.93/mo — full ~130,000-token patient document per screening replaces ~24,000 tokens of retrieved chunks). The Storage row drops from $5.20–$6.35/mo to $2.93–$3.59/mo (KB vector storage removed). Net effect: Total Monthly/Annual Spend rises from $305.20–$394.85/mo ($3,662.40–$4,738.20/yr) to **$317.81–$409.26/mo ($3,813.72–$4,911.12/yr)** — still compliant with `[REQ-COST-01]`, but the high-end margin has compressed from 5.2% to **1.8%** under the ceiling. Recommend validating actual token usage against AWS Cost Explorer shortly after production launch, since normal volume variance could now approach the ceiling.
 

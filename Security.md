@@ -10,7 +10,7 @@ The AI-Assisted Clinical Trial Screening Platform processes Protected Health Inf
 * **AWS KMS Customer-Managed Keys (CMK):** All persistent and transient data storage layers are encrypted using a dedicated KMS Customer-Managed Key (`alias/medical-study-screening-cmk`) with automated annual key rotation enabled.
 * **Amazon S3 Buckets:** Default bucket encryption is set to `aws:kms` utilizing the CMK. S3 Bucket Policies explicitly deny unencrypted uploads (`s3:PutObject` without `x-amz-server-side-encryption: aws:kms`).
 * **Amazon DynamoDB:** Tables (`study-protocols`, `patient-verdicts`) are created with customer-managed KMS CMK encryption at rest.
-* **Vector Store:** Vector embeddings, chunk indices, and metadata are encrypted using the same KMS CMK.
+* **Consolidated Patient Text Store:** The `patient-consolidated-text` S3 bucket (full-document text used for deterministic reasoning, `[REQ-F-11]`) is encrypted using the same KMS CMK; no separate vector store exists as of the 2026-08-27 RAG-to-full-document-reasoning decision.
 
 #### S3 KMS Enforcement Bucket Policy:
 ```json
@@ -91,17 +91,9 @@ All compute resources (Lambda, Step Functions, Bedrock Agents) operate under ded
       ],
       "Resource": [
         "arn:aws:lambda:*:*:function:protocol-rule-structurer",
+        "arn:aws:lambda:*:*:function:patient-text-consolidator",
         "arn:aws:lambda:*:*:function:patient-screening-handler"
       ]
-    },
-    {
-      "Sid": "AllowBedrockKBIngestion",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:StartIngestionJob",
-        "bedrock:GetIngestionJob"
-      ],
-      "Resource": "arn:aws:bedrock:*:*:knowledge-base/*"
     },
     {
       "Sid": "AllowSqsDlqMessages",
@@ -114,6 +106,7 @@ All compute resources (Lambda, Step Functions, Bedrock Agents) operate under ded
   ]
 }
 ```
+**2026-08-27 change:** Removed the `AllowBedrockKBIngestion` statement (`bedrock:StartIngestionJob`/`GetIngestionJob`); no Knowledge Base ingestion occurs under full-document deterministic reasoning (`[REQ-F-11]`). Added `patient-text-consolidator` to `AllowLambdaTaskInvocations` for the new consolidation task.
 
 #### Protocol Rule Structurer Lambda Execution Role Policy (Excerpt) — Scoped to `[REQ-F-05]` Mandated Model:
 This role is intentionally distinct from the Bedrock Agent Execution Role below. `[REQ-F-05]` mandates **Anthropic Claude Sonnet 5** exclusively for one-time protocol rule extraction. Least-privilege IAM enforces that mandate at the policy level, rather than relying solely on prompt/application logic.
@@ -173,6 +166,8 @@ Claude Sonnet 5 has no `bedrock-runtime` In-Region support in *any* AWS Region a
 
 #### Bedrock Agent Execution Role Policy:
 This role serves the single patient-screening Bedrock Agent. `[REQ-F-14]` mandates **Anthropic Claude Sonnet 5** for this agent. Claude Sonnet 5 has no `bedrock-runtime` In-Region support in any AWS Region, so — same as the Protocol Rule Structurer Lambda role above — this policy grants `bedrock:InvokeModel` via the Geographic (US) cross-Region inference profile `us.anthropic.claude-sonnet-5`, per the `[REQ-OPS-01]` relaxation. Per AWS's [documentation for Amazon Bedrock Agents](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-create.html), the inference profile ID is passed in the `foundationModel` field of `CreateAgent`, not a bare foundation-model ID. The same reconfirmation caveats noted above apply (destination-Region list carried over from Claude Sonnet 4.5's table; possible `ca-central-1` inclusion per AWS's Claude Sonnet 5 "US and Canada" wording).
+
+**2026-08-27 change:** Removed `bedrock:Retrieve` and the `knowledge-base/*` resource grant — the agent no longer has a Knowledge Base action group under full-document deterministic reasoning (`[REQ-F-11], [REQ-F-15]`). Removed the DynamoDB and KMS statements from this role: rule-fetching and verdict-writing now happen in the calling `patient-screening-handler` Lambda (see its dedicated execution role below), which passes the fetched rules and the full document text into the agent's prompt directly, rather than the agent touching DynamoDB itself.
 ```json
 {
   "Version": "2012-10-17",
@@ -181,12 +176,10 @@ This role serves the single patient-screening Bedrock Agent. `[REQ-F-14]` mandat
       "Sid": "AllowClaudeSonnet5GeoUsInferenceProfileForAgent",
       "Effect": "Allow",
       "Action": [
-        "bedrock:InvokeModel",
-        "bedrock:Retrieve"
+        "bedrock:InvokeModel"
       ],
       "Resource": [
-        "arn:aws:bedrock:us-west-2:*:inference-profile/us.anthropic.claude-sonnet-5",
-        "arn:aws:bedrock:*:*:knowledge-base/*"
+        "arn:aws:bedrock:us-west-2:*:inference-profile/us.anthropic.claude-sonnet-5"
       ]
     },
     {
@@ -205,32 +198,73 @@ This role serves the single patient-screening Bedrock Agent. `[REQ-F-14]` mandat
           "bedrock:InferenceProfileArn": "arn:aws:bedrock:us-west-2:*:inference-profile/us.anthropic.claude-sonnet-5"
         }
       }
+    }
+  ]
+}
+```
+
+#### Patient Text Consolidator Lambda Execution Role Policy (New, `[REQ-F-11]`):
+Reads all per-file Textract output for a patient and writes the single ordered, page-annotated full-text document consumed by the reasoning step.
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowReadExtractedPatientText",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
+      "Resource": "arn:aws:s3:::patient-extracted-data/*"
+    },
+    {
+      "Sid": "AllowWriteConsolidatedPatientText",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject"],
+      "Resource": "arn:aws:s3:::patient-consolidated-text/*"
+    },
+    {
+      "Sid": "AllowKMSDecrypt",
+      "Effect": "Allow",
+      "Action": ["kms:Decrypt", "kms:GenerateDataKey"],
+      "Resource": "arn:aws:kms:*:*:key/*"
+    }
+  ]
+}
+```
+
+#### Patient Screening Handler Lambda Execution Role Policy (New, `[REQ-F-15, REQ-F-17]`):
+Reads the consolidated full-text document and active protocol rules, invokes the Bedrock Agent with both as direct reasoning input, and persists the resulting verdict.
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowReadConsolidatedPatientText",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject"],
+      "Resource": "arn:aws:s3:::patient-consolidated-text/*"
     },
     {
       "Sid": "AllowDynamoDBReadProtocols",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:GetItem",
-        "dynamodb:Query"
-      ],
+      "Action": ["dynamodb:GetItem", "dynamodb:Query"],
       "Resource": "arn:aws:dynamodb:*:*:table/study-protocols"
     },
     {
       "Sid": "AllowDynamoDBWriteVerdicts",
       "Effect": "Allow",
-      "Action": [
-        "dynamodb:PutItem",
-        "dynamodb:UpdateItem"
-      ],
+      "Action": ["dynamodb:PutItem", "dynamodb:UpdateItem"],
       "Resource": "arn:aws:dynamodb:*:*:table/patient-verdicts"
+    },
+    {
+      "Sid": "AllowInvokeBedrockScreeningAgent",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeAgent"],
+      "Resource": "arn:aws:bedrock:us-west-2:*:agent-alias/*"
     },
     {
       "Sid": "AllowKMSDecrypt",
       "Effect": "Allow",
-      "Action": [
-        "kms:Decrypt",
-        "kms:GenerateDataKey"
-      ],
+      "Action": ["kms:Decrypt", "kms:GenerateDataKey"],
       "Resource": "arn:aws:kms:*:*:key/*"
     }
   ]
