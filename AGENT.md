@@ -62,3 +62,8 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 
 ### 10. Tone & Style
 * Write in clear, direct, technical prose. Avoid marketing fluff, filler adjectives, or setup chatter.
+
+### 11. Current-State vs. Audit-Trail Separation
+* `Architecture.md`, `Security.md`, `Cost.md`, and `Services.md` describe the *current* design only. Do not add "changed on [date]," "removed X, added Y," "as of [date]," or similar diff/changelog narration to these files — that history belongs exclusively in `Log.md`.
+* Design rationale (why a choice was made) and open risks or flagged assumptions (unresolved items a reader must act on) are not changelog narration and should stay inline where relevant — do not strip those when trimming.
+* `Requirements.md` is exempt: its `[Draft]`/`[Approved]`/`[Deprecated]` state and revision provenance are part of its state-tracking purpose (Rule 3) and should be preserved.
