@@ -70,6 +70,10 @@ The platform operates on a **Human-in-the-Loop (HITL)** architecture. The AI aut
 ### 4.4 Observability
 -  **[Draft] [REQ-OBS-01]:** Telemetry
 
+### 4.5 Accuracy, Grounding & Data Completeness
+* **[Draft] [REQ-NF-04]:** The system must not hallucinate. Every criterion status (`MET`, `NOT_MET`, `UNCERTAIN`) and every clinical claim in a verdict must be grounded in a direct, verifiable quote traceable to a specific source document and page (`[REQ-F-16]`). If the foundation model cannot locate supporting text for a criterion, the status must be set to `UNCERTAIN` — the model must never infer, extrapolate, or fabricate a `MET`/`NOT_MET` status without a cited source quote.
+* **[Draft] [REQ-NF-05]:** No information within a patient's uploaded record set may be omitted from evaluation. The system must guarantee 100% page/document coverage per patient across all uploaded files for every screening run — every uploaded page must be read and considered against every active criterion, not merely the fragments a similarity search happens to return.
+
 ---
 
 ## 5. Database Schema Specifications
