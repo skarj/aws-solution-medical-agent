@@ -203,7 +203,7 @@ This role grants only `bedrock:InvokeModel` — the agent has no Knowledge Base 
 ```
 
 #### Screening Trigger Handler Lambda Execution Role Policy (New, `[REQ-F-07, REQ-F-08]`):
-Invoked by the `POST /patients/{PatientID}/screenings` API route once the Clinical Investigator confirms all patient files are staged. Lists the authoritative file set for the patient and starts exactly one Step Functions execution, replacing a raw S3 `ObjectCreated` auto-trigger that would otherwise fire once per uploaded file.
+Invoked by the `POST /patients/{PatientID}/screenings` API route once the Clinical Investigator confirms all patient files are staged. Lists the authoritative file set for the patient and starts exactly one Step Functions execution, replacing a raw S3 `ObjectCreated` auto-trigger that would otherwise fire once per uploaded file. This role omits KMS grants: `s3:ListBucket` returns object key names and metadata only (no decryption of object content), and `states:StartExecution` has no KMS interaction — granting `kms:Decrypt` here would be unused, unjustified access on a data-handling system, so it's deliberately excluded (unlike every other Lambda role in this section, which does touch encrypted object/item content and needs it).
 ```json
 {
   "Version": "2012-10-17",
@@ -222,12 +222,6 @@ Invoked by the `POST /patients/{PatientID}/screenings` API route once the Clinic
       "Effect": "Allow",
       "Action": ["states:StartExecution"],
       "Resource": "arn:aws:states:us-west-2:*:stateMachine:PatientScreeningStateMachine"
-    },
-    {
-      "Sid": "AllowKMSDecrypt",
-      "Effect": "Allow",
-      "Action": ["kms:Decrypt", "kms:GenerateDataKey"],
-      "Resource": "arn:aws:kms:*:*:key/*"
     }
   ]
 }
