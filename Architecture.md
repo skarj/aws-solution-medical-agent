@@ -46,53 +46,17 @@ graph TD
     S3_PROTO -->|"S3 ObjectCreated Event"| EV_BRIDGE
     EV_BRIDGE -->|"Triggers Execution StudyID"| SFN_PROTO
     SFN_PROTO -->|"StartDocumentAnalysis Async"| TEXTRACT
-    SFN_PROTO -->|"Polls GetDocumentAnalysis on Wait Loop"| TEXTRACT
+    SFN_PROTO -->|"Polls GetDocumentAnalysis on Wait Loop (Catch: Throttling to Retry with Backoff)"| TEXTRACT
     TEXTRACT -->|"Writes Extracted Text on SUCCEEDED"| S3_PROTO_EXTRACTED
     SFN_PROTO -->|"Invokes Task with S3 Pointer"| LAMBDA_STRUCT
     LAMBDA_STRUCT -->|"Reads Extracted Text"| S3_PROTO_EXTRACTED
-    LAMBDA_STRUCT -->|"Prompts with JSON Schema"| BEDROCK_LLM
+    LAMBDA_STRUCT -->|"Prompts with JSON Schema (Catch: Throttling to Retry with Backoff)"| BEDROCK_LLM
     BEDROCK_LLM -->|"Returns Structured Rules JSON"| LAMBDA_STRUCT
     LAMBDA_STRUCT -->|"PutItem StudyID, Rules"| DDB_PROTO
-    SFN_PROTO -.->|"On Task Failure / Retry Exceeded"| SQS_DLQ
+    SFN_PROTO -.->|"On OCR/Bedrock Failure, Schema Violation, or Retries Exceeded: Alert Admin"| SQS_DLQ
 ```
 
-### 2.2 Protocol Onboarding State Machine (`stateDiagram-v2`)
-
-```mermaid
-stateDiagram-v2
-    [*] --> StartProtocolExecution: S3 Event Trigger (StudyID)
-    
-    state "Start Textract Async OCR Job" as StartProtocolOcr
-    state "Wait 5s Polling Interval" as WaitForProtocolOcr
-    state "Poll GetDocumentAnalysis Status" as PollProtocolOcr
-    state "Check OCR Status" as CheckProtocolOcr <<choice>>
-    state "Save Extracted Text to S3 protocol-extracted-data" as SaveProtocolText
-    state "Execute Lambda Rule Structurer Task" as LambdaExtractRules
-    state "Invoke Bedrock Model JSON Enforcement" as BedrockRulePrompt
-    state "PutItem to study-protocols Table" as PersistProtocolRules
-    state "Route to SQS DLQ & Alert Admin" as ProtocolErrorState
-
-    StartProtocolExecution --> StartProtocolOcr
-    StartProtocolOcr --> WaitForProtocolOcr: StartDocumentAnalysis(Tables) Returns JobId
-    WaitForProtocolOcr --> PollProtocolOcr: Elapsed 5s
-    PollProtocolOcr --> CheckProtocolOcr: GetDocumentAnalysis(JobId)
-    
-    CheckProtocolOcr --> SaveProtocolText: OCR Status == SUCCEEDED
-    CheckProtocolOcr --> WaitForProtocolOcr: OCR Status == IN_PROGRESS
-    PollProtocolOcr --> PollProtocolOcr: Catch [Throttling - Retry with Backoff]
-    CheckProtocolOcr --> ProtocolErrorState: OCR Status == FAILED / Retries Exhausted
-
-    SaveProtocolText --> LambdaExtractRules: Write Extracted Text to S3
-    LambdaExtractRules --> BedrockRulePrompt: Send Formatted Markdown Text
-    BedrockRulePrompt --> PersistProtocolRules: Valid Structured JSON Rules Returned
-    BedrockRulePrompt --> LambdaExtractRules: Catch [Throttling / Retry with Backoff]
-    BedrockRulePrompt --> ProtocolErrorState: Catch [Schema Violation / Fatal Error]
-
-    PersistProtocolRules --> [*]: Protocol Onboarding Succeeded
-    ProtocolErrorState --> [*]: Execution Terminated (DLQ Captured)
-```
-
-### 2.3 Detailed Pipeline Stages:
+### 2.2 Detailed Pipeline Stages:
 1. **Document Ingestion (`[REQ-F-01]`):** The Clinical Investigator uploads `protocol.pdf` to `s3://protocol-data-upload/{StudyID}/`.
 2. **State Machine Execution Trigger (`[REQ-F-02]`):** S3 ObjectCreated event routes via Amazon EventBridge to launch the Protocol Onboarding Step Functions state machine with input metadata `{StudyID, Bucket, Key}`.
 3. **Asynchronous Table-Preserving OCR (`[REQ-F-03]`):** Step Functions starts Amazon Textract `StartDocumentAnalysis` with the `TABLES` feature type only (`FORMS` was dropped from `[REQ-F-03]` on 2026-08-25 to bring Textract spend within `[REQ-COST-01]`), then polls `GetDocumentAnalysis` on a `Wait`/`Choice` loop (5-second interval) until the job reports `SUCCEEDED`, `FAILED`, or the retry budget is exhausted. Amazon Textract has no native Step Functions `.sync`/`.waitForTaskToken` service integration, so polling — not a callback — is the supported asynchronous pattern.
@@ -134,73 +98,26 @@ graph TD
     LAMBDA_TRIGGER -->|"StartExecution Deterministic Name"| SFN_START
     SFN_START --> MAP_OCR
     MAP_OCR -->|"Parallel StartDocumentAnalysis Async"| TEXTRACT_ASYNC
-    MAP_OCR -->|"Polls GetDocumentAnalysis Per Item"| TEXTRACT_ASYNC
+    MAP_OCR -->|"Polls GetDocumentAnalysis Per Item (Catch: RateLimit to Retry with Exponential Backoff)"| TEXTRACT_ASYNC
     TEXTRACT_ASYNC -->|"Extracted Text on SUCCEEDED"| S3_EXTRACT
     S3_EXTRACT -->|"Reads All Per-File Extracted Text"| LAMBDA_CONSOLIDATE
     LAMBDA_CONSOLIDATE -->|"Writes Ordered, Page-Annotated Full Text"| S3_CONSOLIDATED
     S3_CONSOLIDATED -->|"Claim-Check Pointer"| LAMBDA_SCREEN
     LAMBDA_SCREEN -->|"Pull Protocol Rules"| DDB_PROTO
-    LAMBDA_SCREEN -->|"Invoke With Complete Document Text"| BEDROCK_AGENT
+    LAMBDA_SCREEN -->|"Invoke With Complete Document Text (Catch: Bedrock Throttling to Retry with Backoff)"| BEDROCK_AGENT
     BEDROCK_AGENT -->|"Structured Verdict JSON"| LAMBDA_SCREEN
-    LAMBDA_SCREEN -->|"PutItem Verdict"| DDB_VERDICT
-    MAP_OCR -.->|"On Failure Retries Exceeded"| SQS_DLQ
-    LAMBDA_SCREEN -.->|"On Unhandled Error"| SQS_DLQ
+    LAMBDA_SCREEN -->|"Conditional PutItem Verdict (Rejected if reviewer_signoff Already APPROVED/REJECTED - No Overwrite)"| DDB_VERDICT
+    MAP_OCR -.->|"On Fatal OCR Error / 3x Retries Exceeded: Alert Reviewer"| SQS_DLQ
+    LAMBDA_SCREEN -.->|"On Consolidation or Agent Invocation Failure: Alert Reviewer"| SQS_DLQ
 ```
 
-### 3.2 Patient Screening State Machine (`stateDiagram-v2`)
-
-```mermaid
-stateDiagram-v2
-    [*] --> InitScreeningExecution: screening-trigger-handler StartExecution (PatientID, StudyID, FileKeys)
-    
-    state "Parallel Map State: Process Patient PDFs" as MapStateOcr {
-        [*] --> LaunchAsyncOcr: Item = PDF S3 Key
-        state "Start Textract Async Job" as LaunchAsyncOcr
-        state "Wait 5s Polling Interval" as WaitForOcrPoll
-        state "Poll GetDocumentAnalysis Status" as PollOcrStatus
-        state "Check OCR Status" as CheckOcrStatus <<choice>>
-        LaunchAsyncOcr --> WaitForOcrPoll: StartDocumentAnalysis Returns JobId
-        WaitForOcrPoll --> PollOcrStatus: Elapsed 5s
-        PollOcrStatus --> CheckOcrStatus: GetDocumentAnalysis(JobId)
-        CheckOcrStatus --> [*]: OCR Status == SUCCEEDED
-        CheckOcrStatus --> WaitForOcrPoll: OCR Status == IN_PROGRESS
-    }
-    
-    state "Save Extracted Text to S3" as SaveExtractedText
-    state "Execute Lambda Text Consolidator Task" as ConsolidateText
-    state "Write Full-Text Document to S3 (Claim-Check)" as SaveConsolidatedText
-    state "Execute Lambda patient-screening-handler Task" as InvokeAgentTask
-    state "Conditional PutItem to patient-verdicts Table" as PersistVerdictTable
-    state "Route to SQS DLQ & Alert Reviewer" as ScreeningErrorState
-    state "Verdict Write Blocked - Existing Reviewer Decision Preserved" as VerdictWriteBlocked
-
-    InitScreeningExecution --> MapStateOcr: Validate Input Metadata
-    MapStateOcr --> SaveExtractedText: All Files Completed Successfully
-    MapStateOcr --> MapStateOcr: Catch [RateLimit / Retry with Exponential Backoff]
-    MapStateOcr --> ScreeningErrorState: Catch [Fatal OCR Error / 3x Retries Exceeded]
-
-    SaveExtractedText --> ConsolidateText: Write Extracted Text to S3
-    ConsolidateText --> SaveConsolidatedText: Merge All Files into Ordered, Page-Annotated Text
-    ConsolidateText --> ScreeningErrorState: Catch [Consolidation Failure]
-
-    SaveConsolidatedText --> InvokeAgentTask: Pass S3 Pointer (Claim-Check)
-    InvokeAgentTask --> PersistVerdictTable: Structured Verdict JSON (MET, NOT_MET, UNCERTAIN)
-    InvokeAgentTask --> InvokeAgentTask: Catch [Bedrock Throttling / Retry with Backoff]
-    InvokeAgentTask --> ScreeningErrorState: Catch [Agent Invocation Failure]
-    PersistVerdictTable --> VerdictWriteBlocked: Catch [ConditionalCheckFailedException - reviewer_signoff.status Already APPROVED or REJECTED]
-
-    PersistVerdictTable --> [*]: Screening Succeeded (Status = PENDING Review)
-    ScreeningErrorState --> [*]: Execution Failed (Captured in DLQ)
-    VerdictWriteBlocked --> [*]: Execution Halted (Existing Reviewer Decision Preserved, Alert Logged)
-```
-
-### 3.3 Execution Steps & State Specifications:
+### 3.2 Execution Steps & State Specifications:
 1. **Multi-File Trigger (`[REQ-F-07, REQ-F-08]`):** The Clinical Investigator uploads 1 or more PDF records to `s3://patient-data-upload/{PatientID}/`. Screening is **not** auto-triggered off raw S3 `ObjectCreated` events — S3 fires one such event per uploaded object, and a patient with multiple files (avg. 2/patient per Scope) would otherwise start one incomplete-record execution per file, risking partial-coverage verdicts against `[REQ-NF-05]` and doubling Textract/Bedrock cost. Instead, once the Investigator confirms all files are staged and selects the target `StudyID`, the Web UI calls `POST /patients/{PatientID}/screenings` (Amazon API Gateway, Cognito-authenticated per `[REQ-SEC-04]`) with `{StudyID}`. The `screening-trigger-handler` Lambda lists the `patient-data-upload/{PatientID}/` prefix itself (the authoritative file set, not a client-supplied list) and calls `states:StartExecution` with input `{PatientID, StudyID, FileKeys}`, using an execution name deterministically derived from `PatientID`+`StudyID` so a duplicate or double-clicked trigger call hits Step Functions' `ExecutionAlreadyExists` instead of starting a second concurrent run.
 2. **Parallel Asynchronous OCR (`[REQ-F-09]`):** Step Functions executes a dynamic `Map` state over all uploaded files. Each iteration calls `StartDocumentAnalysis`, then polls `GetDocumentAnalysis` on a `Wait`/`Choice` loop (5-second interval) per item until `SUCCEEDED` or `FAILED` — Amazon Textract has no native Step Functions callback integration, so each Map iteration polls independently rather than waiting on a shared notification.
 3. **Raw Text Storage & Full-Document Consolidation (`[REQ-F-10, REQ-F-11]`):** Extracted text is saved in `s3://patient-extracted-data/{PatientID}/`, one object per uploaded file. Step Functions invokes the `Lambda: Patient Text Consolidator` task, which reads every per-file object for the `PatientID`, concatenates them in a stable order with explicit source-filename and page-number boundary markers, and writes a single ordered full-text document to `s3://patient-consolidated-text/{PatientID}/`. No chunking or embedding occurs (`[REQ-F-11], [REQ-NF-05]`).
 4. **Citation Metadata Preservation (`[REQ-F-13]`):** Every page boundary within the consolidated document retains its `patient_id`, `source_filename`, and `page_number` tags inline, so the reasoning step can still cite an exact source location for every claim without a vector index.
 5. **Deterministic Full-Document Single-Agent Reasoning (`[REQ-F-14, REQ-F-15, REQ-F-16, REQ-NF-04, REQ-NF-05]`):** Step Functions invokes `Lambda: patient-screening-handler` with `{PatientID, StudyID}` and the `[REQ-F-11]` S3 Claim-Check pointer (respecting the Step Functions 256 KB state limit, since the full consolidated text — roughly 130,000 tokens for an average 200-page patient record set — would exceed it). The Lambda reads the complete consolidated text from S3, fetches active criteria from DynamoDB `study-protocols`, and invokes a single Bedrock Agent powered by **Anthropic Claude Sonnet 5** (mandated by `[REQ-F-14]`) with the entire patient document passed as direct reasoning input — no retrieval step, no similarity search. Claude Sonnet 5's verified 1,000,000-token context window (`docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html`) comfortably holds the full document at baseline scale. The agent populates the structured JSON verdict (`MET`, `NOT_MET`, `UNCERTAIN`) with citations and exact quotes, setting `UNCERTAIN` rather than inferring when no supporting text exists (`[REQ-NF-04]`). As with the protocol-extraction Lambda in Workflow 1, the agent's `foundationModel` is set to the Geographic (US) cross-Region inference profile `us.anthropic.claude-sonnet-5` (via `CreateAgent`'s `foundationModel` field) rather than a bare model ID, since Claude Sonnet 5 has no `us-west-2` In-Region support — permitted by the `[REQ-OPS-01]` relaxation; see `Security.md`. **Open risk (flagged, not yet validated):** processing ~130,000 input tokens per screening (versus the prior ~24,000-token retrieved-chunk average) has not been latency-tested against the `[REQ-NF-01]` 10-minute end-to-end SLA; confirm actual Bedrock inference latency at this input size before production deployment.
-6. **Persistence & Auditing (`[REQ-F-17]`):** `Lambda: patient-screening-handler` writes the output verdict to `patient-verdicts` with default status `PENDING`, using a conditional `PutItem` (`ConditionExpression`: item does not exist, or `reviewer_signoff.status = PENDING`). If a Clinical Investigator has already recorded `APPROVED`/`REJECTED` for this `{PatientID, StudyID}`, the condition fails and the write is rejected rather than silently overwriting the reviewer's binding determination — preserving the immutable audit record required by `[REQ-SEC-05]`. A rejected write routes to the `VerdictWriteBlocked` terminal state (§3.2) rather than the general DLQ error path, since it reflects a protected record, not a failure.
+6. **Persistence & Auditing (`[REQ-F-17]`):** `Lambda: patient-screening-handler` writes the output verdict to `patient-verdicts` with default status `PENDING`, using a conditional `PutItem` (`ConditionExpression`: item does not exist, or `reviewer_signoff.status = PENDING`). If a Clinical Investigator has already recorded `APPROVED`/`REJECTED` for this `{PatientID, StudyID}`, the condition fails and the write is rejected rather than silently overwriting the reviewer's binding determination — preserving the immutable audit record required by `[REQ-SEC-05]`. A rejected write is not routed to the general DLQ error path, since it reflects a protected record, not a failure — the conditional write itself (§3.1) is the enforcement point.
 
 ---
 

@@ -41,7 +41,7 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
   `[YYYY-MM-DD HH:MM UTC] | [FILE CHANGED] | [SUMMARY OF CHANGE] | [TARGET REQ ID / PROMPT INTENT]`
 ### 6. Diagrams & Visualization Standards
 * Render system architecture, data flows, and subnets in `Architecture.md` using Mermaid.js (`graph TD` or `sequenceDiagram`).
-* Render AWS Step Functions state machines using Mermaid `stateDiagram-v2`. Visually segregate `Choice` branches, `Catch`/`Retry` flows, and error handling states.
+* Represent AWS Step Functions retry/catch/choice logic as labeled edges and prose within the component flow diagram (e.g., `-.->|"On Task Failure / Retry Exceeded"|`), not a separate `stateDiagram-v2`. Defer a dedicated `stateDiagram-v2` state machine diagram until the state machine is actually being implemented (ASL authored) — at the specification stage it triples the maintenance surface (component diagram + state diagram + prose all describing the same pipeline) for detail (explicit `Wait` states, poll intervals) that isn't yet load-bearing for an approval decision.
 * **Sanitize Node Labels**: Require double quotes around all node labels (e.g., `nodeA["API Gateway (REST)"]`) to prevent syntax errors.
 * **Subgraphs**: Use `subgraph` blocks to visually segregate AWS Accounts, Regions, VPCs, Public/Private Subnets, and third-party systems.
 * **Sub-Diagrams**: Split large architectures into focused diagrams (e.g., High-Level Topology vs. Ingestion Flow) to prevent visual clutter.
@@ -67,3 +67,10 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 * `Architecture.md`, `Security.md`, `Cost.md`, and `Services.md` describe the *current* design only. Do not add "changed on [date]," "removed X, added Y," "as of [date]," or similar diff/changelog narration to these files — that history belongs exclusively in `Log.md`.
 * Design rationale (why a choice was made) and open risks or flagged assumptions (unresolved items a reader must act on) are not changelog narration and should stay inline where relevant — do not strip those when trimming.
 * `Requirements.md` is exempt: its `[Draft]`/`[Approved]`/`[Deprecated]` state and revision provenance are part of its state-tracking purpose (Rule 3) and should be preserved.
+
+### 12. Recurring Review Practices
+* **No Partial-Unit Triggers**: When a logical unit of work can span multiple independently-uploaded objects (e.g., a multi-file record), never auto-trigger downstream processing off a raw per-object event (e.g., S3 `ObjectCreated`). Require an explicit finalize/confirm action, or maintain an authoritative expected-vs-received count, before starting execution.
+* **IAM Grant Justification**: After drafting or copying any IAM policy, verify each granted action is actually invoked by that role's own code path. Do not carry over grants from a similar role's policy by pattern-matching alone.
+* **Post-Pivot Terminology Sweep**: After replacing one core architectural pattern with another (e.g., RAG with full-document reasoning), search all governed files for terminology tied to the old pattern — not just the file(s) where the primary logic changed.
+* **Same-File Consistency Check**: When updating a computed or summarized figure anywhere in a file, verify every other section of that same file that restates it (executive summaries, totals, headline numbers) is updated to match before considering the edit complete.
+* **Explicit Assumption Flagging**: When a quantitative sizing parameter is needed but has no corresponding statement in `Requirements.md`, do not silently estimate it. Insert an explicit `[Agent Assumption — Unsourced]` marker and flag it for human confirmation.
