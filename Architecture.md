@@ -103,7 +103,7 @@ stateDiagram-v2
 
 ## 3. Workflow 2: Automated Patient Screening Pipeline
 
-This workflow processes multi-file patient records (up to 150 MB total, digital or scanned faxes/records) and performs RAG-augmented deterministic reasoning against protocol criteria using an AWS Step Functions state machine.
+This workflow processes multi-file patient records (up to 150 MB total, digital or scanned faxes/records) and performs full-document deterministic reasoning against protocol criteria using an AWS Step Functions state machine (`[REQ-F-11], [REQ-F-15]`).
 
 ### 3.1 Component Flow Diagram
 
