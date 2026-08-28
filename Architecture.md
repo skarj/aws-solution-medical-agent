@@ -110,9 +110,11 @@ This workflow processes multi-file patient records (up to 150 MB total, digital 
 ```mermaid
 graph TD
     CLINICIAN["Clinical Investigator"]
+    UI_WEB["Web UI: Finalize Upload Action"]
     S3_PATIENT["S3: patient-data-upload/{PatientID}/"]
-    EV_BRIDGE["Amazon EventBridge"]
-    SFN_START["Execution Start: PatientID, StudyID"]
+    APIGW_TRIGGER["API Gateway: POST /patients/PatientID/screenings"]
+    LAMBDA_TRIGGER["Lambda: screening-trigger-handler"]
+    SFN_START["Execution Start: PatientID, StudyID, FileKeys"]
     MAP_OCR["Map State: Parallel OCR"]
     S3_EXTRACT["S3: patient-extracted-data"]
     LAMBDA_CONSOLIDATE["Lambda: Patient Text Consolidator"]
@@ -125,8 +127,11 @@ graph TD
     DDB_VERDICT["DynamoDB: patient-verdicts Table"]
 
     CLINICIAN -->|"Uploads Multi-PDF Records"| S3_PATIENT
-    S3_PATIENT -->|"ObjectCreated Event"| EV_BRIDGE
-    EV_BRIDGE -->|"Triggers Execution"| SFN_START
+    CLINICIAN -->|"Confirms All Files Staged, Selects StudyID"| UI_WEB
+    UI_WEB -->|"POST StudyID"| APIGW_TRIGGER
+    APIGW_TRIGGER -->|"Invokes with Claims"| LAMBDA_TRIGGER
+    LAMBDA_TRIGGER -->|"Lists Authoritative File Set"| S3_PATIENT
+    LAMBDA_TRIGGER -->|"StartExecution Deterministic Name"| SFN_START
     SFN_START --> MAP_OCR
     MAP_OCR -->|"Parallel StartDocumentAnalysis Async"| TEXTRACT_ASYNC
     MAP_OCR -->|"Polls GetDocumentAnalysis Per Item"| TEXTRACT_ASYNC
@@ -146,7 +151,7 @@ graph TD
 
 ```mermaid
 stateDiagram-v2
-    [*] --> InitScreeningExecution: S3 Event Trigger (PatientID, StudyID)
+    [*] --> InitScreeningExecution: screening-trigger-handler StartExecution (PatientID, StudyID, FileKeys)
     
     state "Parallel Map State: Process Patient PDFs" as MapStateOcr {
         [*] --> LaunchAsyncOcr: Item = PDF S3 Key
@@ -165,8 +170,9 @@ stateDiagram-v2
     state "Execute Lambda Text Consolidator Task" as ConsolidateText
     state "Write Full-Text Document to S3 (Claim-Check)" as SaveConsolidatedText
     state "Execute Lambda patient-screening-handler Task" as InvokeAgentTask
-    state "PutItem to patient-verdicts Table" as PersistVerdictTable
+    state "Conditional PutItem to patient-verdicts Table" as PersistVerdictTable
     state "Route to SQS DLQ & Alert Reviewer" as ScreeningErrorState
+    state "Verdict Write Blocked - Existing Reviewer Decision Preserved" as VerdictWriteBlocked
 
     InitScreeningExecution --> MapStateOcr: Validate Input Metadata
     MapStateOcr --> SaveExtractedText: All Files Completed Successfully
@@ -181,18 +187,20 @@ stateDiagram-v2
     InvokeAgentTask --> PersistVerdictTable: Structured Verdict JSON (MET, NOT_MET, UNCERTAIN)
     InvokeAgentTask --> InvokeAgentTask: Catch [Bedrock Throttling / Retry with Backoff]
     InvokeAgentTask --> ScreeningErrorState: Catch [Agent Invocation Failure]
+    PersistVerdictTable --> VerdictWriteBlocked: Catch [ConditionalCheckFailedException - reviewer_signoff.status Already APPROVED or REJECTED]
 
     PersistVerdictTable --> [*]: Screening Succeeded (Status = PENDING Review)
     ScreeningErrorState --> [*]: Execution Failed (Captured in DLQ)
+    VerdictWriteBlocked --> [*]: Execution Halted (Existing Reviewer Decision Preserved, Alert Logged)
 ```
 
 ### 3.3 Execution Steps & State Specifications:
-1. **Multi-File Trigger (`[REQ-F-07, REQ-F-08]`):** The Clinical Investigator uploads 1 or more PDF records to `s3://patient-data-upload/{PatientID}/`. S3 ObjectCreated triggers an EventBridge rule executing the Step Functions state machine.
+1. **Multi-File Trigger (`[REQ-F-07, REQ-F-08]`):** The Clinical Investigator uploads 1 or more PDF records to `s3://patient-data-upload/{PatientID}/`. Screening is **not** auto-triggered off raw S3 `ObjectCreated` events — S3 fires one such event per uploaded object, and a patient with multiple files (avg. 2/patient per Scope) would otherwise start one incomplete-record execution per file, risking partial-coverage verdicts against `[REQ-NF-05]` and doubling Textract/Bedrock cost. Instead, once the Investigator confirms all files are staged and selects the target `StudyID`, the Web UI calls `POST /patients/{PatientID}/screenings` (Amazon API Gateway, Cognito-authenticated per `[REQ-SEC-04]`) with `{StudyID}`. The `screening-trigger-handler` Lambda lists the `patient-data-upload/{PatientID}/` prefix itself (the authoritative file set, not a client-supplied list) and calls `states:StartExecution` with input `{PatientID, StudyID, FileKeys}`, using an execution name deterministically derived from `PatientID`+`StudyID` so a duplicate or double-clicked trigger call hits Step Functions' `ExecutionAlreadyExists` instead of starting a second concurrent run.
 2. **Parallel Asynchronous OCR (`[REQ-F-09]`):** Step Functions executes a dynamic `Map` state over all uploaded files. Each iteration calls `StartDocumentAnalysis`, then polls `GetDocumentAnalysis` on a `Wait`/`Choice` loop (5-second interval) per item until `SUCCEEDED` or `FAILED` — Amazon Textract has no native Step Functions callback integration, so each Map iteration polls independently rather than waiting on a shared notification.
 3. **Raw Text Storage & Full-Document Consolidation (`[REQ-F-10, REQ-F-11]`):** Extracted text is saved in `s3://patient-extracted-data/{PatientID}/`, one object per uploaded file. Step Functions invokes the `Lambda: Patient Text Consolidator` task, which reads every per-file object for the `PatientID`, concatenates them in a stable order with explicit source-filename and page-number boundary markers, and writes a single ordered full-text document to `s3://patient-consolidated-text/{PatientID}/`. No chunking or embedding occurs (`[REQ-F-11], [REQ-NF-05]`).
 4. **Citation Metadata Preservation (`[REQ-F-13]`):** Every page boundary within the consolidated document retains its `patient_id`, `source_filename`, and `page_number` tags inline, so the reasoning step can still cite an exact source location for every claim without a vector index.
 5. **Deterministic Full-Document Single-Agent Reasoning (`[REQ-F-14, REQ-F-15, REQ-F-16, REQ-NF-04, REQ-NF-05]`):** Step Functions invokes `Lambda: patient-screening-handler` with `{PatientID, StudyID}` and the `[REQ-F-11]` S3 Claim-Check pointer (respecting the Step Functions 256 KB state limit, since the full consolidated text — roughly 130,000 tokens for an average 200-page patient record set — would exceed it). The Lambda reads the complete consolidated text from S3, fetches active criteria from DynamoDB `study-protocols`, and invokes a single Bedrock Agent powered by **Anthropic Claude Sonnet 5** (mandated by `[REQ-F-14]`) with the entire patient document passed as direct reasoning input — no retrieval step, no similarity search. Claude Sonnet 5's verified 1,000,000-token context window (`docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html`) comfortably holds the full document at baseline scale. The agent populates the structured JSON verdict (`MET`, `NOT_MET`, `UNCERTAIN`) with citations and exact quotes, setting `UNCERTAIN` rather than inferring when no supporting text exists (`[REQ-NF-04]`). As with the protocol-extraction Lambda in Workflow 1, the agent's `foundationModel` is set to the Geographic (US) cross-Region inference profile `us.anthropic.claude-sonnet-5` (via `CreateAgent`'s `foundationModel` field) rather than a bare model ID, since Claude Sonnet 5 has no `us-west-2` In-Region support — permitted by the `[REQ-OPS-01]` relaxation; see `Security.md`. **Open risk (flagged, not yet validated):** processing ~130,000 input tokens per screening (versus the prior ~24,000-token retrieved-chunk average) has not been latency-tested against the `[REQ-NF-01]` 10-minute end-to-end SLA; confirm actual Bedrock inference latency at this input size before production deployment.
-6. **Persistence & Auditing (`[REQ-F-17]`):** `Lambda: patient-screening-handler` writes the output verdict to `patient-verdicts` with default status `PENDING`.
+6. **Persistence & Auditing (`[REQ-F-17]`):** `Lambda: patient-screening-handler` writes the output verdict to `patient-verdicts` with default status `PENDING`, using a conditional `PutItem` (`ConditionExpression`: item does not exist, or `reviewer_signoff.status = PENDING`). If a Clinical Investigator has already recorded `APPROVED`/`REJECTED` for this `{PatientID, StudyID}`, the condition fails and the write is rejected rather than silently overwriting the reviewer's binding determination — preserving the immutable audit record required by `[REQ-SEC-05]`. A rejected write routes to the `VerdictWriteBlocked` terminal state (§3.2) rather than the general DLQ error path, since it reflects a protected record, not a failure.
 
 ---
 

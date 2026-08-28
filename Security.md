@@ -202,6 +202,37 @@ This role grants only `bedrock:InvokeModel` — the agent has no Knowledge Base 
 }
 ```
 
+#### Screening Trigger Handler Lambda Execution Role Policy (New, `[REQ-F-07, REQ-F-08]`):
+Invoked by the `POST /patients/{PatientID}/screenings` API route once the Clinical Investigator confirms all patient files are staged. Lists the authoritative file set for the patient and starts exactly one Step Functions execution, replacing a raw S3 `ObjectCreated` auto-trigger that would otherwise fire once per uploaded file.
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowListPatientUploadPrefix",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": "arn:aws:s3:::patient-data-upload",
+      "Condition": {
+        "StringLike": { "s3:prefix": "*/" }
+      }
+    },
+    {
+      "Sid": "AllowStartPatientScreeningExecution",
+      "Effect": "Allow",
+      "Action": ["states:StartExecution"],
+      "Resource": "arn:aws:states:us-west-2:*:stateMachine:PatientScreeningStateMachine"
+    },
+    {
+      "Sid": "AllowKMSDecrypt",
+      "Effect": "Allow",
+      "Action": ["kms:Decrypt", "kms:GenerateDataKey"],
+      "Resource": "arn:aws:kms:*:*:key/*"
+    }
+  ]
+}
+```
+
 #### Patient Text Consolidator Lambda Execution Role Policy (New, `[REQ-F-11]`):
 Reads all per-file Textract output for a patient and writes the single ordered, page-annotated full-text document consumed by the reasoning step.
 ```json
@@ -291,3 +322,4 @@ Reads the consolidated full-text document and active protocol rules, invokes the
 * **AWS CloudTrail:** Multi-region CloudTrail trail enabled with log file validation. Data events are captured for all S3 bucket accesses (`s3:GetObject`, `s3:PutObject`) and KMS key operations (`kms:Decrypt`).
 * **CloudWatch Logs Retention:** All application, Step Functions, and API Gateway logs are encrypted with KMS and retained for a minimum of 7 years in compliance with clinical trial regulatory mandates (FDA 21 CFR Part 11 / HIPAA).
 * **Clinical Review Signoff Auditing:** Reviewer decisions (`Approve`, `Reject`, `Manual Override`), timestamp (ISO 8601), user identity (Cognito sub), and clinician notes are stored immutably in `patient-verdicts`.
+* **Conditional-Write Immutability Guard:** `patient-screening-handler`'s automated verdict write uses a conditional `PutItem` (`ConditionExpression`: item does not exist, or `reviewer_signoff.status = PENDING`), so a re-run of the screening pipeline for the same `{PatientID, StudyID}` cannot silently overwrite a Clinical Investigator's already-recorded `APPROVED`/`REJECTED` determination. This is the mechanism backing the "immutable" claim above against automated writes; the reviewer-facing signoff API (`[REQ-F-20]`) is unaffected and retains full `Approve`/`Reject`/`Manual Override` authority, since that is intentional human authority, not an automated overwrite.

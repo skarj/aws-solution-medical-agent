@@ -73,10 +73,10 @@ No embeddings are generated in this architecture — full-document deterministic
 
 ---
 
-### 3.5 Orchestration & API — Step Functions, Lambda & API Gateway (`[REQ-F-02, REQ-F-08, REQ-SEC-02]`)
-* **AWS Step Functions:** 100 patient screening executions + 2 protocol onboarding executions (~1,530 state transitions / month) = $0.04 / month.
-* **AWS Lambda:** ~3,000 invocations / month across OCR handlers, parsing, and review APIs = $0.20 / month.
-* **Amazon API Gateway:** ~5,000 REST API requests / month = $0.02 / month.
+### 3.5 Orchestration & API — Step Functions, Lambda & API Gateway (`[REQ-F-02, REQ-F-07, REQ-F-08, REQ-SEC-02]`)
+* **AWS Step Functions:** 100 patient screening executions + 2 protocol onboarding executions (~1,530 state transitions / month) = $0.04 / month. The `screening-trigger-handler` Lambda now guarantees exactly one execution per patient (`[REQ-F-07, REQ-F-08]`), so this figure no longer risks being doubled by duplicate per-file S3 event triggers.
+* **AWS Lambda:** ~3,000 invocations / month across OCR handlers, parsing, the `screening-trigger-handler` finalize-upload trigger (~100/month, one per patient), and review APIs = $0.20 / month (the added trigger invocations are within the existing modeled volume, no change to this line).
+* **Amazon API Gateway:** ~5,000 REST API requests / month, including the new `POST /patients/{PatientID}/screenings` route (~100/month) = $0.02 / month (no change to this line).
 * **Networking & Data Transfer:** Pure serverless communication over AWS backbone; $0.00 idle networking cost (no VPC Interface Endpoint ENI or NAT Gateway fees).
 * **Estimated Monthly Subtotal:** **$2.00 – $7.00 / month**.
 
