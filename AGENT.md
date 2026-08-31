@@ -12,6 +12,7 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 * `Cost.md` — **[Agent-Owned]** Monthly/annual cost estimations, scale assumptions, and pricing models.
 * `Security.md` — **[Agent-Owned]** IAM policies, encryption standards, network isolation, and compliance controls.
 * `Services.md` — **[Agent-Owned]** AWS service inventory paired with official AWS documentation links.
+* `POC-results.md` — **[Agent-Owned, Historical]** Point-in-time record of proof-of-concept testing: methodology, measurements, problems found, and downstream requirement impact. Exempt from Rule 11's current-state-only constraint — each POC's findings are appended as a new dated section and never rewritten to match later current-state changes.
 * `Log.md` — **[Agent-Exclusive Write]** Append-only audit trail of all repository modifications.
 
 ## Core Rules & Instructions

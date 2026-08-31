@@ -20,7 +20,7 @@ All quantitative pricing calculations derive strictly from the operational metri
 | **Average Patient File Size** | 25 MB – 50 MB / PDF | 50 MB – 100 MB total per patient record |
 | **Monthly Ingestion Data Volume** | 100 patients × 75 MB avg = **7.5 GB / month** | S3 Standard Ingestion |
 | **Study Protocol Onboarding** | 2 protocols / month (avg 100 pages each) | **[Agent Assumption — Unsourced]** `Requirements.md` states no protocol-upload rate; this figure is not derived from Requirements.md and needs human confirmation per `AGENT.md` Rule 7. **200 pages / month** OCR volume |
-| **Full-Document Reasoning Input per Screening** | 200 pages / patient × ~650 tokens / page (rate derived from `[REQ-F-05]`'s protocol-extraction sizing below) | **~130,000 input tokens / patient screening** (`[REQ-F-11], [REQ-F-15]`) |
+| **Full-Document Reasoning Input per Screening** | 200 pages / patient × ~650 tokens / page (rate derived from `[REQ-F-05]`'s protocol-extraction sizing below) | **~130,000 input tokens / patient screening** (`[REQ-F-11], [REQ-F-15]`). **Corroborated by stage-0 POC measurement (2026-08-31):** real Bedrock usage on an actual 42-page protocol and 39-page patient record measured ~2.7 chars/token, working out to ~670–700 tokens/page for both documents — closely matching the ~650 tokens/page assumption already used here. |
 | **Clinical Review API Access** | ~100 reviews / month × 50 requests/review | ~5,000 API calls & Presigned S3 fetches |
 
 ---
@@ -46,7 +46,7 @@ No embeddings are generated in this architecture — full-document deterministic
 * **Monthly Calculation:** (130,000/1,000,000 × $2.20) + (12,000/1,000,000 × $11.00) = $0.286 + $0.132 = **$0.42 / month**.
 * **Estimated Monthly Range:** **$0.38 – $0.42 / month** (Global-tier rate at the low end, Standard-tier at the high end — confirm actual billed tier via Cost Explorer once deployed).
 
-#### B. Patient Screening Reasoning Agent (`[REQ-F-14, REQ-F-16]` — Anthropic Claude Sonnet 5):
+#### B. Patient Screening Reasoning (`[REQ-F-14, REQ-F-16]` — Anthropic Claude Sonnet 5, direct `InvokeModel`):
 * Input sizing reflects the full consolidated patient document (`[REQ-F-11], [REQ-F-15]`), verified against Claude Sonnet 5's 1,000,000-token context window (`docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html`).
 * **Input Context Tokens:** 100 patients × ~130,000 tokens/patient (full-document text, §2 sizing table) = **13,000,000 input tokens / month**.
 * **Output Verdict Tokens:** 100 patients × 1,500 output tokens = 150,000 output tokens / month.
@@ -86,6 +86,7 @@ No embeddings are generated in this architecture — full-document deterministic
 * **AWS KMS:** 1 Customer-Managed Key ($1.00) + ~60,000 cryptographic operations ($0.18) = $1.18 / month.
 * **Amazon Cognito:** User directory with under 50 Clinical Investigator MAUs (Free Tier covers up to 50,000 MAUs) = $0.00 / month.
 * **AWS CloudTrail & CloudWatch Logs:** S3 Data Events + 10 GB/month log ingestion + 7-year log retention = $10.00 – $30.00 / month.
+* **CloudTrail DynamoDB Data Events (`[REQ-SEC-08]`):** ~11,500 item-level operations / month (~1,500 writes + ~10,000 reads, per §3.4) × $0.000001 / data event (verified via AWS Price List API, `us-west-2`, SKU `RDWGMK92MEBUVNWF`, effective 2026-07-01) = **~$0.01 / month** — absorbed within the range above, no change to the subtotal.
 * **Estimated Monthly Subtotal:** **$11.00 – $30.00 / month**.
 
 ---
@@ -95,7 +96,7 @@ No embeddings are generated in this architecture — full-document deterministic
 | Category | Primary AWS Services | Baseline Low (USD/mo) | Baseline High (USD/mo) | Governing REQ IDs |
 | :--- | :--- | :--- | :--- | :--- |
 | **Document Processing** | Amazon Textract (Async OCR, Tables only) | $273.00 | $333.00 | `[REQ-F-03, REQ-F-09]` |
-| **AI Reasoning** | Amazon Bedrock (Agent, Claude Sonnet 5, full-document input) | $27.88 | $30.67 | `[REQ-F-05, REQ-F-11, REQ-F-14, REQ-F-16]` |
+| **AI Reasoning** | Amazon Bedrock (direct InvokeModel, Claude Sonnet 5, full-document input) | $27.88 | $30.67 | `[REQ-F-05, REQ-F-11, REQ-F-14, REQ-F-16]` |
 | **Storage** | Amazon S3 (raw, extracted, and consolidated text) | $2.93 | $3.59 | `[REQ-F-01, REQ-F-04, REQ-F-07, REQ-F-10, REQ-F-11]` |
 | **Database Tier** | Amazon DynamoDB (On-Demand) | $1.00 | $5.00 | `[REQ-F-06, REQ-F-17]` |
 | **Orchestration & API** | Step Functions + Lambda + API Gateway | $2.00 | $7.00 | `[REQ-F-02, REQ-F-08, REQ-SEC-02]` |

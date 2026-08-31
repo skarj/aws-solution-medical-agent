@@ -67,7 +67,7 @@ The AI-Assisted Clinical Trial Screening Platform processes Protected Health Inf
 * **RBAC - ComplianceAuditor:** Read-only access to immutable CloudTrail audit logs, review determinations, and regulatory compliance dashboards.
 
 ### 3.2 Service Least-Privilege IAM Policies
-All compute resources (Lambda, Step Functions, Bedrock Agents) operate under dedicated execution roles with zero wildcard permissions on data actions.
+All compute resources (Lambda, Step Functions) operate under dedicated execution roles with zero wildcard permissions on data actions.
 
 #### Step Functions State Machine Execution Role Policy (Excerpt):
 ```json
@@ -108,7 +108,7 @@ All compute resources (Lambda, Step Functions, Bedrock Agents) operate under ded
 ```
 
 #### Protocol Rule Structurer Lambda Execution Role Policy (Excerpt) — Scoped to `[REQ-F-05]` Mandated Model:
-This role is intentionally distinct from the Bedrock Agent Execution Role below. `[REQ-F-05]` mandates **Anthropic Claude Sonnet 5** exclusively for one-time protocol rule extraction. Least-privilege IAM enforces that mandate at the policy level, rather than relying solely on prompt/application logic.
+This role is intentionally distinct from the Patient Screening Handler role below, so each Lambda's model access is scoped to its own workload. `[REQ-F-05]` mandates **Anthropic Claude Sonnet 5** exclusively for one-time protocol rule extraction. Least-privilege IAM enforces that mandate at the policy level, rather than relying solely on prompt/application logic.
 
 Claude Sonnet 5 has no `bedrock-runtime` In-Region support in *any* AWS Region and can only be invoked via a Geographic (US) or Global cross-Region inference profile. `[REQ-OPS-01]` was relaxed to permit the Geographic (US) profile specifically (see `Requirements.md`). Per AWS's documented IAM pattern for Geographic cross-Region inference, the policy below grants `bedrock:InvokeModel` on both the inference-profile ARN and the underlying foundation-model ARN in the source Region and each destination Region the profile can route to, scoped with a `Condition` on `bedrock:InferenceProfileArn` so the foundation-model grant cannot be used outside that profile. The destination-Region list (`us-east-1`, `us-east-2`) is carried over from the equivalent table published for Claude Sonnet 4.5, since Claude Sonnet 5's own model-card page did not expose a per-source-Region breakdown at review time — **reconfirm this list against the live Bedrock console or `GetInferenceProfile` before production deployment**, and note AWS's Claude Sonnet 5 documentation describes the US profile as keeping data within "US and Canada," so a `ca-central-1` destination should also be verified/excluded if strict US-only residency is required.
 ```json
@@ -163,44 +163,7 @@ Claude Sonnet 5 has no `bedrock-runtime` In-Region support in *any* AWS Region a
 }
 ```
 
-#### Bedrock Agent Execution Role Policy:
-This role serves the single patient-screening Bedrock Agent. `[REQ-F-14]` mandates **Anthropic Claude Sonnet 5** for this agent. Claude Sonnet 5 has no `bedrock-runtime` In-Region support in any AWS Region, so — same as the Protocol Rule Structurer Lambda role above — this policy grants `bedrock:InvokeModel` via the Geographic (US) cross-Region inference profile `us.anthropic.claude-sonnet-5`, per the `[REQ-OPS-01]` relaxation. Per AWS's [documentation for Amazon Bedrock Agents](https://docs.aws.amazon.com/bedrock/latest/userguide/agents-create.html), the inference profile ID is passed in the `foundationModel` field of `CreateAgent`, not a bare foundation-model ID. The same reconfirmation caveats noted above apply (destination-Region list carried over from Claude Sonnet 4.5's table; possible `ca-central-1` inclusion per AWS's Claude Sonnet 5 "US and Canada" wording).
-
-This role grants only `bedrock:InvokeModel` — the agent has no Knowledge Base action group and never touches DynamoDB or S3 directly. Rule-fetching, full-text reading, and verdict-writing are handled by the calling `patient-screening-handler` Lambda (see its dedicated execution role below), which passes the fetched rules and full document text into the agent's prompt directly.
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "AllowClaudeSonnet5GeoUsInferenceProfileForAgent",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:InvokeModel"
-      ],
-      "Resource": [
-        "arn:aws:bedrock:us-west-2:*:inference-profile/us.anthropic.claude-sonnet-5"
-      ]
-    },
-    {
-      "Sid": "AllowClaudeSonnet5FoundationModelAcrossGeoUsDestinationsForAgent",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:InvokeModel"
-      ],
-      "Resource": [
-        "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5",
-        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5",
-        "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5"
-      ],
-      "Condition": {
-        "StringEquals": {
-          "bedrock:InferenceProfileArn": "arn:aws:bedrock:us-west-2:*:inference-profile/us.anthropic.claude-sonnet-5"
-        }
-      }
-    }
-  ]
-}
-```
+No separate Bedrock Agent execution role exists: `[REQ-F-14]` specifies a direct `bedrock-runtime:InvokeModel` call rather than a Bedrock Agent, so the screening step's model-invocation grant lives on the `patient-screening-handler` Lambda's own execution role (below) instead of on an agent principal.
 
 #### Screening Trigger Handler Lambda Execution Role Policy (New, `[REQ-F-07, REQ-F-08]`):
 Invoked by the `POST /patients/{PatientID}/screenings` API route once the Clinical Investigator confirms all patient files are staged. Lists the authoritative file set for the patient and starts exactly one Step Functions execution, replacing a raw S3 `ObjectCreated` auto-trigger that would otherwise fire once per uploaded file. This role omits KMS grants: `s3:ListBucket` returns object key names and metadata only (no decryption of object content), and `states:StartExecution` has no KMS interaction — granting `kms:Decrypt` here would be unused, unjustified access on a data-handling system, so it's deliberately excluded (unlike every other Lambda role in this section, which does touch encrypted object/item content and needs it).
@@ -255,8 +218,8 @@ Reads all per-file Textract output for a patient and writes the single ordered, 
 }
 ```
 
-#### Patient Screening Handler Lambda Execution Role Policy (New, `[REQ-F-15, REQ-F-17]`):
-Reads the consolidated full-text document and active protocol rules, invokes the Bedrock Agent with both as direct reasoning input, and persists the resulting verdict.
+#### Patient Screening Handler Lambda Execution Role Policy (`[REQ-F-14, REQ-F-15, REQ-F-17, REQ-NF-06]`):
+Reads the consolidated full-text document and active protocol rules, invokes Claude Sonnet 5 directly with both as reasoning input, mechanically verifies every returned citation against the source text (`[REQ-NF-06]`), and persists the resulting verdict. The Bedrock grant uses the same two-statement Geographic (US) cross-Region inference-profile pattern as the Protocol Rule Structurer role above (and carries the same unresolved reconfirmation caveats on the destination-Region list and `ca-central-1` residency question). Citation verification needs no additional grant — it compares the model's output against the consolidated text this role already reads from S3.
 ```json
 {
   "Version": "2012-10-17",
@@ -280,10 +243,25 @@ Reads the consolidated full-text document and active protocol rules, invokes the
       "Resource": "arn:aws:dynamodb:*:*:table/patient-verdicts"
     },
     {
-      "Sid": "AllowInvokeBedrockScreeningAgent",
+      "Sid": "AllowClaudeSonnet5GeoUsInferenceProfileForScreening",
       "Effect": "Allow",
-      "Action": ["bedrock:InvokeAgent"],
-      "Resource": "arn:aws:bedrock:us-west-2:*:agent-alias/*"
+      "Action": ["bedrock:InvokeModel"],
+      "Resource": ["arn:aws:bedrock:us-west-2:*:inference-profile/us.anthropic.claude-sonnet-5"]
+    },
+    {
+      "Sid": "AllowClaudeSonnet5FoundationModelAcrossGeoUsDestinationsForScreening",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel"],
+      "Resource": [
+        "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5",
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5",
+        "arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "bedrock:InferenceProfileArn": "arn:aws:bedrock:us-west-2:*:inference-profile/us.anthropic.claude-sonnet-5"
+        }
+      }
     },
     {
       "Sid": "AllowKMSDecrypt",
@@ -313,7 +291,7 @@ Reads the consolidated full-text document and active protocol rules, invokes the
 * Data processing and model invocation execute strictly within customer-defined AWS Regions; Bedrock does not log or retain customer prompt/completion data for foundational model training.
 
 ### 5.2 Immutable Audit Trail (`[REQ-SEC-05]`)
-* **AWS CloudTrail:** Multi-region CloudTrail trail enabled with log file validation. Data events are captured for all S3 bucket accesses (`s3:GetObject`, `s3:PutObject`) and KMS key operations (`kms:Decrypt`).
+* **AWS CloudTrail:** Multi-region CloudTrail trail enabled with log file validation. Data events are captured for all S3 bucket accesses (`s3:GetObject`, `s3:PutObject`), KMS key operations (`kms:Decrypt`), and — per `[REQ-SEC-08]` — item-level operations on the `study-protocols` and `patient-verdicts` DynamoDB tables (`GetItem`, `Query`, `PutItem`, `UpdateItem`). The DynamoDB data events close a gap in the S3/KMS-only scope: `patient-verdicts` items hold direct PHI excerpts (`citations[].quote`, `Requirements.md` §5.2) and `study-protocols` holds trial protocol IP, so item-level reads and writes against them belong in the audit trail alongside document access.
 * **CloudWatch Logs Retention:** All application, Step Functions, and API Gateway logs are encrypted with KMS and retained for a minimum of 7 years in compliance with clinical trial regulatory mandates (FDA 21 CFR Part 11 / HIPAA).
 * **Clinical Review Signoff Auditing:** Reviewer decisions (`Approve`, `Reject`, `Manual Override`), timestamp (ISO 8601), user identity (Cognito sub), and clinician notes are stored immutably in `patient-verdicts`.
 * **Conditional-Write Immutability Guard:** `patient-screening-handler`'s automated verdict write uses a conditional `PutItem` (`ConditionExpression`: item does not exist, or `reviewer_signoff.status = PENDING`), so a re-run of the screening pipeline for the same `{PatientID, StudyID}` cannot silently overwrite a Clinical Investigator's already-recorded `APPROVED`/`REJECTED` determination. This is the mechanism backing the "immutable" claim above against automated writes; the reviewer-facing signoff API (`[REQ-F-20]`) is unaffected and retains full `Approve`/`Reject`/`Manual Override` authority, since that is intentional human authority, not an automated overwrite.
