@@ -58,3 +58,33 @@ All 15 extracted criteria (4 inclusion, 11 exclusion) evaluated with full covera
 - Bedrock Guardrails (`[REQ-SEC-07]`) — discussed as a complementary control, not empirically exercised.
 - Opus 5 vs. Sonnet 5 comparison — discussed, never run.
 - `[REQ-OBS-01]`'s agreement-rate drift monitoring — needs multiple runs with reviewer signoff to be meaningful, out of scope for a single smoke test.
+
+---
+
+## Stage 0 follow-up — `citations[]` schema validation (2026-09-01)
+
+### Scope & method
+
+Validated whether `Requirements.md` §5.2's `citations` array (replacing the single `evidence_quote`/`source_filename`/`page_citation` fields) actually fixes the two confirmed splicing patterns from the stage-0 run above. Updated `stage0_poc.ipynb`'s `SCREENING_SYSTEM_PROMPT` and citation-verification loop to the new schema, then re-ran the full notebook against the same protocol and patient record, reusing the cached Textract output (no new OCR spend; only the protocol-extraction and screening Bedrock calls were live).
+
+### Result: both splicing patterns confirmed fixed
+
+Of 15 criteria, 7 returned **multiple separate citations** instead of one combined string — exactly the cases that previously forced page-bridging or row-splicing:
+
+- The exclusion previously requiring a `...`-bridged quote across a page boundary (comorbid medical compromise) now returns two independent citations, one on page 14 and one on page 15.
+- The renal-insufficiency exclusion (previously one spliced Creatinine+eGFR string) now returns two separate citations, one per lab value.
+- The growth-hormone-allergy exclusion (previously one spliced two-row string) now returns two separate citations, one per allergy-table row.
+
+Zero citations in this run contained an ellipsis marker. Of 18 total citations produced, 17 verified as literal substrings of the source text; the run's `screening_bedrock` call took 55.4s (vs. 33.5–45.8s in the stage-0 runs) — still comfortably within the `[REQ-NF-01]` 600s budget — with input/output tokens of 37,563/6,415.
+
+### One verification failure — same root cause as the already-documented column-merge limitation, not a new bug
+
+The pregnancy-test citation (`EXC11`) failed the mechanical substring check: the model quoted `"Preg Test,UR POC | Negative"`, but the raw OCR text reads `"Component Preg Test,UR POC | Value Negative"` (confirmed via direct grep of the cached OCR output). The model silently dropped the `Component`/`Value` column-header artifacts from Textract's merged-cell output — the same unrecoverable column-merge condition already documented above, now caught in the wild. This is exactly the failure mode `[REQ-NF-06]`'s mechanical check exists for; the notebook's check correctly flagged it (would force `MANUAL_REVIEW_REQUIRED` in a production implementation — the notebook itself doesn't apply that override, per its stage-0 JSON-parsing simplification noted in `protocol-extract-helpers`).
+
+### Not confirmed either way
+
+The third stage-0 finding (non-deterministic preservation of inline annotation markers like `[JL.1]`) wasn't exercised in this run — no citation in this verdict happened to touch text containing one. Absence of the symptom here isn't evidence the underlying model behavior changed; it just wasn't triggered by this criteria/evidence combination.
+
+### What changed in the governed docs as a result
+
+- `Cost.md`: the `Output Verdict Tokens` assumption (1,500 tokens/patient) was already stale before this run — stage-0 had measured 3,800–5,100 — and this run's 6,415 widens that gap further. Revised the working assumption to ~6,500 output tokens/patient based on this measurement (the only data point under the new, more verbose `citations[]`+`reasoning` schema; small sample, flagged accordingly), recomputed the Bedrock screening cost line and the total cost summary.

@@ -3,8 +3,8 @@
 The AI-Assisted Clinical Trial Screening Platform is designed with a fully serverless, pay-per-use architecture that eliminates fixed 24/7 idle compute and database cluster fees.
 
 * **Governing Requirement:** `[REQ-COST-01]` (Total AWS infrastructure spend under $5,000.00 / year / ~$416.66 / month).
-* **Projected Baseline Operational Spend:** **$167.61 – $228.03 / month** (**$2,011.32 – $2,736.36 / year**).
-* **Budget Status: Compliant, comfortable margin.** The baseline (low) figure is **59.8% under** the `[REQ-COST-01]` ceiling; the high end of the estimation range is **45.3% under** it. Actual token usage should still be confirmed against Cost Explorer after production launch, but volume variance does not threaten the ceiling at this scale.
+* **Projected Baseline Operational Spend:** **$170.11 – $230.78 / month** (**$2,041.32 – $2,769.36 / year**).
+* **Budget Status: Compliant, comfortable margin.** The baseline (low) figure is **59.2% under** the `[REQ-COST-01]` ceiling; the high end of the estimation range is **44.6% under** it. Actual token usage should still be confirmed against Cost Explorer after production launch, but volume variance does not threaten the ceiling at this scale.
 * **Verified against the AWS Price List API**: Amazon Textract `TABLES` - only pricing ($0.015/page, SKU `FYDFD3P65PH8TD44`), Anthropic Claude Sonnet 5 On-Demand token pricing (`us-west-2`, effective 2026-08-01) for both `[REQ-F-05]` (protocol extraction) and `[REQ-F-14]`/`[REQ-F-16]` (screening agent), and S3 Standard API request rates (PUT $0.005/1k, GET $0.0004/1k).
 
 ---
@@ -49,10 +49,10 @@ No embeddings are generated in this architecture — full-document deterministic
 #### B. Patient Screening Reasoning (`[REQ-F-14, REQ-F-16]` — Anthropic Claude Sonnet 5, direct `InvokeModel`):
 * Input sizing reflects the full consolidated patient document (`[REQ-F-11], [REQ-F-15]`), verified against Claude Sonnet 5's 1,000,000-token context window (`docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html`).
 * **Input Context Tokens:** 50 patients × ~130,000 tokens/patient (full-document text, §2 sizing table) = **6,500,000 input tokens / month**.
-* **Output Verdict Tokens:** 50 patients × 1,500 output tokens = 75,000 output tokens / month.
+* **Output Verdict Tokens:** 50 patients × ~6,500 output tokens = 325,000 output tokens / month — the required `reasoning` field plus a `citations` array per criterion (`[REQ-F-16]`, §5.2) produces substantially more output than a single quote field; measured via `medical-study-poc` POC testing (6,415 output tokens on one real screening run under this schema — a single data point, revisit with more runs).
 * **Pricing Rate (verified via AWS Price List API, `us-west-2`, effective 2026-08-01):** Same Claude Sonnet 5 rates as §3.2.A above — `[REQ-F-14]` mandates Claude Sonnet 5 for this agent.
-* **Token Cost:** (6,500,000/1,000,000 × $2.00–$2.20) + (75,000/1,000,000 × $10.00–$11.00) = $13.00–$14.30 + $0.75–$0.825 = **$13.75 – $15.13 / month**.
-* **Estimated Monthly Subtotal:** **$13.75 – $15.13 / month**.
+* **Token Cost:** (6,500,000/1,000,000 × $2.00–$2.20) + (325,000/1,000,000 × $10.00–$11.00) = $13.00–$14.30 + $3.25–$3.58 = **$16.25 – $17.88 / month**.
+* **Estimated Monthly Subtotal:** **$16.25 – $17.88 / month**.
 
 ---
 
@@ -96,13 +96,13 @@ No embeddings are generated in this architecture — full-document deterministic
 | Category | Primary AWS Services | Baseline Low (USD/mo) | Baseline High (USD/mo) | Governing REQ IDs |
 | :--- | :--- | :--- | :--- | :--- |
 | **Document Processing** | Amazon Textract (Async OCR, Tables only) | $137.70 | $168.30 | `[REQ-F-03, REQ-F-09]` |
-| **AI Reasoning** | Amazon Bedrock (direct InvokeModel, Claude Sonnet 5, full-document input) | $14.13 | $15.55 | `[REQ-F-05, REQ-F-11, REQ-F-14, REQ-F-16]` |
+| **AI Reasoning** | Amazon Bedrock (direct InvokeModel, Claude Sonnet 5, full-document input) | $16.63 | $18.30 | `[REQ-F-05, REQ-F-11, REQ-F-14, REQ-F-16]` |
 | **Storage** | Amazon S3 (raw, extracted, and consolidated text) | $1.78 | $2.18 | `[REQ-F-01, REQ-F-04, REQ-F-07, REQ-F-10, REQ-F-11]` |
 | **Database Tier** | Amazon DynamoDB (On-Demand) | $1.00 | $5.00 | `[REQ-F-06, REQ-F-17]` |
 | **Orchestration & API** | Step Functions + Lambda + API Gateway | $2.00 | $7.00 | `[REQ-F-02, REQ-F-08, REQ-SEC-02]` |
 | **Security & Auditing** | AWS KMS + CloudWatch + CloudTrail + Cognito | $11.00 | $30.00 | `[REQ-SEC-01, REQ-SEC-04, REQ-SEC-05]` |
-| **Total Monthly Spend** | | **$167.61** | **$228.03** | `[REQ-COST-01]` |
-| **Total Annual Spend** | | **$2,011.32** | **$2,736.36** | **Budget Ceiling: $5,000.00 — baseline 59.8% under; high end 45.3% under (compliant, comfortable margin)** |
+| **Total Monthly Spend** | | **$170.11** | **$230.78** | `[REQ-COST-01]` |
+| **Total Annual Spend** | | **$2,041.32** | **$2,769.36** | **Budget Ceiling: $5,000.00 — baseline 59.2% under; high end 44.6% under (compliant, comfortable margin)** |
 
-**Note:** AI Reasoning ($14.13–$15.55/mo) is Claude Sonnet 5 protocol extraction ($0.38–$0.42/mo, driven by protocol onboarding rate, not patient volume) plus full-document screening agent tokens ($13.75–$15.13/mo, `[REQ-F-11], [REQ-F-15]`); no vector index costs apply anywhere in this architecture. Document Processing remains the dominant cost driver; recommend validating actual token and page usage against AWS Cost Explorer after production launch.
+**Note:** AI Reasoning ($16.63–$18.30/mo) is Claude Sonnet 5 protocol extraction ($0.38–$0.42/mo, driven by protocol onboarding rate, not patient volume) plus full-document screening agent tokens ($16.25–$17.88/mo, `[REQ-F-11], [REQ-F-15]`); no vector index costs apply anywhere in this architecture. Document Processing remains the dominant cost driver; recommend validating actual token and page usage against AWS Cost Explorer after production launch.
 
