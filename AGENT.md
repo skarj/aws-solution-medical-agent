@@ -64,10 +64,10 @@ Guide the LLM agent in maintaining AWS solution architecture documentation using
 ### 10. Tone & Style
 * Write in clear, direct, technical prose. Avoid marketing fluff, filler adjectives, or setup chatter.
 
-### 11. Current-State vs. Audit-Trail Separation
-* `Architecture.md`, `Security.md`, `Cost.md`, and `Services.md` describe the *current* design only. Do not add "changed on [date]," "removed X, added Y," "as of [date]," or similar diff/changelog narration to these files — that history belongs exclusively in `Log.md`.
-* Design rationale (why a choice was made) and open risks or flagged assumptions (unresolved items a reader must act on) are not changelog narration and should stay inline where relevant — do not strip those when trimming.
-* `Requirements.md` is exempt: its `[Draft]`/`[Approved]`/`[Deprecated]` state and revision provenance are part of its state-tracking purpose (Rule 3) and should be preserved.
+### Rule 11 — Current-State vs. Audit-Trail Separation (revised)
+- Requirements.md, Architecture.md, Security.md, Cost.md, and Services.md describe the current design and current requirement set only. Do not add "changed on [date]," "removed X, added Y," "as of [date]," "(Revised/Added/Approved [date] — ...)," or similar diff/changelog/provenance narration to these files — that history belongs exclusively in Log.md.
+- Design rationale (why a choice was made) and open risks or flagged assumptions (unresolved items a reader must act on) are not changelog narration and should stay inline where relevant — do not strip those when trimming.
+- Requirements.md's [Draft]/[Approved]/[Deprecated] state tag is not changelog narration and must be preserved (Rule 3). The revision date and per-change rationale that used to accompany it belongs in Log.md only, not inline in Requirements.md — a deprecated requirement's inline note should be a short pointer (e.g. "Superseded by [REQ-F-11] — see Log.md"), not a restated history.
 
 ### 12. Recurring Review Practices
 * **No Partial-Unit Triggers**: When a logical unit of work can span multiple independently-uploaded objects (e.g., a multi-file record), never auto-trigger downstream processing off a raw per-object event (e.g., S3 `ObjectCreated`). Require an explicit finalize/confirm action, or maintain an authoritative expected-vs-received count, before starting execution.
